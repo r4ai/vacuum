@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -80,6 +80,44 @@ fn has_gradle_context(dir: &Path) -> bool {
     dir.join("build.gradle").exists() || dir.join("build.gradle.kts").exists()
 }
 
+fn has_python_context_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path) -> bool {
+    if let Some(has_context) = cache.get(dir) {
+        return *has_context;
+    }
+    let has_context = has_python_context(dir);
+    cache.insert(dir.to_path_buf(), has_context);
+    has_context
+}
+
+fn has_gradle_context_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path) -> bool {
+    if let Some(has_context) = cache.get(dir) {
+        return *has_context;
+    }
+    let has_context = has_gradle_context(dir);
+    cache.insert(dir.to_path_buf(), has_context);
+    has_context
+}
+
+fn has_file_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path, name: &str) -> bool {
+    if let Some(has_file) = cache.get(dir) {
+        return *has_file;
+    }
+    let has_file = dir.join(name).exists();
+    cache.insert(dir.to_path_buf(), has_file);
+    has_file
+}
+
+fn has_python_source_file_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path) -> bool {
+    if let Some(has_source) = cache.get(dir) {
+        return *has_source;
+    }
+    let has_source = dir.read_dir().is_ok_and(|mut d| {
+        d.any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "py")))
+    });
+    cache.insert(dir.to_path_buf(), has_source);
+    has_source
+}
+
 /// Scan enabled adapters with a single directory walk for core adapters.
 /// Gitignore adapter is still executed separately due matcher semantics.
 pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> {
@@ -92,6 +130,13 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
     let mut all: Vec<CleanTarget> = Vec::new();
     let mut seen_paths: HashSet<PathBuf> = HashSet::new();
     let mut iter = WalkDir::new(root).follow_links(false).into_iter();
+    let mut node_context_cache: HashMap<PathBuf, bool> = HashMap::new();
+    let mut cargo_context_cache: HashMap<PathBuf, bool> = HashMap::new();
+    let mut go_context_cache: HashMap<PathBuf, bool> = HashMap::new();
+    let mut maven_context_cache: HashMap<PathBuf, bool> = HashMap::new();
+    let mut gradle_context_cache: HashMap<PathBuf, bool> = HashMap::new();
+    let mut python_context_cache: HashMap<PathBuf, bool> = HashMap::new();
+    let mut python_source_cache: HashMap<PathBuf, bool> = HashMap::new();
 
     while let Some(entry) = iter.next() {
         let entry = match entry {
@@ -108,13 +153,16 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
             };
             let mut matched: Option<(&'static str, String)> = None;
 
-            if cli.node && name == "node_modules" && parent.join("package.json").exists() {
+            if cli.node
+                && name == "node_modules"
+                && has_file_cached(&mut node_context_cache, parent, "package.json")
+            {
                 matched = Some(("node", "Node.js dependencies (node_modules/)".into()));
             }
             if matched.is_none()
                 && cli.cargo
                 && name == "target"
-                && parent.join("Cargo.toml").exists()
+                && has_file_cached(&mut cargo_context_cache, parent, "Cargo.toml")
             {
                 matched = Some(("cargo", "Cargo build artifacts (target/)".into()));
             }
@@ -123,7 +171,7 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
                     let mut p = parent;
                     let mut found = false;
                     for _ in 0..4 {
-                        if has_python_context(p) {
+                        if has_python_context_cached(&mut python_context_cache, p) {
                             found = true;
                             break;
                         }
@@ -132,31 +180,33 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
                             None => break,
                         }
                     }
-                    found
-                        || parent.read_dir().is_ok_and(|mut d| {
-                            d.any(|e| {
-                                e.is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "py"))
-                            })
-                        })
+                    found || has_python_source_file_cached(&mut python_source_cache, parent)
                 } else {
-                    has_python_context(parent)
+                    has_python_context_cached(&mut python_context_cache, parent)
                 };
 
                 if has_context {
                     matched = Some(("python", format!("Python build artifact ({name}/)")));
                 }
             }
-            if matched.is_none() && cli.go && name == "vendor" && parent.join("go.mod").exists() {
+            if matched.is_none()
+                && cli.go
+                && name == "vendor"
+                && has_file_cached(&mut go_context_cache, parent, "go.mod")
+            {
                 matched = Some(("go", "Go vendor directory (vendor/)".into()));
             }
             if matched.is_none()
                 && cli.gradle
                 && (name == ".gradle" || name == "build")
-                && has_gradle_context(parent)
+                && has_gradle_context_cached(&mut gradle_context_cache, parent)
             {
                 matched = Some(("gradle", format!("Gradle build artifact ({name}/)")));
             }
-            if matched.is_none() && cli.maven && name == "target" && parent.join("pom.xml").exists()
+            if matched.is_none()
+                && cli.maven
+                && name == "target"
+                && has_file_cached(&mut maven_context_cache, parent, "pom.xml")
             {
                 matched = Some(("maven", "Maven build artifacts (target/)".into()));
             }
