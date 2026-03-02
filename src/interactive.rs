@@ -569,7 +569,7 @@ fn render_table(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
         };
         let style = if is_active {
             Style::default()
-                .fg(Color::White)
+                .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
         } else {
             Style::default()
