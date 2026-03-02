@@ -520,7 +520,7 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
             Constraint::Min(3),    // table
             Constraint::Length(1), // search bar
             Constraint::Length(1), // stats
-            Constraint::Length(2), // hint
+            Constraint::Length(1), // hint
         ])
         .split(area);
 
@@ -715,65 +715,31 @@ fn render_stats(frame: &mut ratatui::Frame, app: &App, area: Rect) {
 }
 
 fn render_hint(frame: &mut ratatui::Frame, app: &App, area: Rect) {
-    let hint = if app.mode == Mode::Visual {
-        Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled(
-                    " VISUAL",
-                    Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD),
-                ),
-                Span::raw("  "),
-                Span::styled("[↑↓/jk]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Extend range  "),
-                Span::styled("[PgUp/PgDn]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Page  "),
-                Span::styled("[g/G]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Top/Bot"),
-            ]),
-            Line::from(vec![
-                Span::styled(" [Space]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Toggle range  "),
-                Span::styled("[a]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Select range  "),
-                Span::styled("[n]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Deselect range  "),
-                Span::styled("[v/Esc]", Style::default().fg(Color::Red)),
-                Span::raw(" Exit visual"),
-            ]),
+    let k = |s| Span::styled(s, Style::default().fg(Color::Yellow));
+    let t = |s| Span::raw(s);
+
+    let line = if app.mode == Mode::Visual {
+        Line::from(vec![
+            Span::styled(" VISUAL", Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)),
+            t("  "),
+            k("[↑↓/jk]"), t(" Extend  "),
+            k("[Space]"), t(" Toggle  "),
+            k("[a/n]"), t(" Sel/Desel  "),
+            Span::styled("[v/Esc]", Style::default().fg(Color::Red)), t(" Exit"),
         ])
     } else {
-        Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled(" [↑↓/jk]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Move  "),
-                Span::styled("[PgUp/PgDn]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Page  "),
-                Span::styled("[^u/^d]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Half  "),
-                Span::styled("[g/G]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Top/Bot  "),
-                Span::styled("[1-4]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Sort"),
-            ]),
-            Line::from(vec![
-                Span::styled(" [Space]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Toggle  "),
-                Span::styled("[v]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Visual  "),
-                Span::styled("[a/n]", Style::default().fg(Color::Yellow)),
-                Span::raw(" All/None  "),
-                Span::styled("[/]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Filter  "),
-                Span::styled("[?]", Style::default().fg(Color::Yellow)),
-                Span::raw(" Help  "),
-                Span::styled("[Enter]", Style::default().fg(Color::Green)),
-                Span::raw(" Confirm  "),
-                Span::styled("[q]", Style::default().fg(Color::Red)),
-                Span::raw(" Quit"),
-            ]),
+        Line::from(vec![
+            k(" [↑↓/jk]"), t(" Move  "),
+            k("[Space]"), t(" Toggle  "),
+            k("[v]"), t(" Visual  "),
+            k("[a/n]"), t(" All/None  "),
+            k("[/]"), t(" Filter  "),
+            k("[?]"), t(" Help  "),
+            Span::styled("[Enter]", Style::default().fg(Color::Green)), t(" Confirm  "),
+            Span::styled("[q]", Style::default().fg(Color::Red)), t(" Quit"),
         ])
     };
-    frame.render_widget(hint, area);
+    frame.render_widget(Paragraph::new(line), area);
 }
 
 fn render_help_overlay(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
