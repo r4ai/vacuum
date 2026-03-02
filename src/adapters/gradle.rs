@@ -26,18 +26,14 @@ impl Adapter for GradleAdapter {
 
     fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
         let mut targets = Vec::new();
-        let mut skip_prefixes: Vec<std::path::PathBuf> = Vec::new();
+        let mut iter = WalkDir::new(root).follow_links(false).into_iter();
 
-        for entry in WalkDir::new(root)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
+        while let Some(entry) = iter.next() {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
             let path = entry.path();
-
-            if skip_prefixes.iter().any(|p| path.starts_with(p)) {
-                continue;
-            }
 
             if !entry.file_type().is_dir() {
                 continue;
@@ -63,7 +59,7 @@ impl Adapter for GradleAdapter {
                 description: format!("Gradle build artifact ({name}/)"),
                 size,
             });
-            skip_prefixes.push(path.to_path_buf());
+            iter.skip_current_dir();
         }
 
         Ok(targets)

@@ -30,13 +30,13 @@ impl Adapter for GitignoreAdapter {
         let gitignore = builder.build()?;
 
         let mut targets = Vec::new();
-        let mut skip_prefixes: Vec<std::path::PathBuf> = Vec::new();
+        let mut iter = WalkDir::new(root).follow_links(false).into_iter();
 
-        for entry in WalkDir::new(root)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
+        while let Some(entry) = iter.next() {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
             let path = entry.path();
 
             // Skip the root itself
@@ -49,10 +49,6 @@ impl Adapter for GitignoreAdapter {
                 .components()
                 .any(|c| c.as_os_str() == ".git")
             {
-                continue;
-            }
-
-            if skip_prefixes.iter().any(|p| path.starts_with(p)) {
                 continue;
             }
 
@@ -77,7 +73,7 @@ impl Adapter for GitignoreAdapter {
                     size,
                 });
                 if is_dir {
-                    skip_prefixes.push(path.to_path_buf());
+                    iter.skip_current_dir();
                 }
             }
         }
