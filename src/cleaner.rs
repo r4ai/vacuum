@@ -5,6 +5,68 @@ use std::fs;
 
 use crate::adapter::CleanTarget;
 
+// ─── TUI-compatible deletion (background thread) ─────────────────────────────
+
+/// Progress event sent from `delete_with_progress` to the TUI thread.
+#[derive(Debug)]
+pub enum DeleteMsg {
+    Progress {
+        path: String,
+        freed: u64,
+        done: usize,
+        total: usize,
+    },
+    Done {
+        freed: u64,
+        errors: Vec<(String, String)>,
+    },
+}
+
+/// Delete targets and stream progress to the caller via `tx`.
+/// Designed to run inside `std::thread::spawn`.
+/// On `dry_run = true` the files are not deleted; progress events are still sent.
+pub fn delete_with_progress(
+    targets: Vec<CleanTarget>,
+    dry_run: bool,
+    tx: std::sync::mpsc::Sender<DeleteMsg>,
+) {
+    let total = targets.len();
+    let mut freed: u64 = 0;
+    let mut errors: Vec<(String, String)> = Vec::new();
+
+    for (i, target) in targets.iter().enumerate() {
+        let path_str = target.path.display().to_string();
+
+        if !dry_run {
+            let result = if target.path.is_dir() {
+                fs::remove_dir_all(&target.path).with_context(|| {
+                    format!("Failed to remove directory: {}", target.path.display())
+                })
+            } else {
+                fs::remove_file(&target.path).with_context(|| {
+                    format!("Failed to remove file: {}", target.path.display())
+                })
+            };
+
+            match result {
+                Ok(()) => freed += target.size,
+                Err(e) => errors.push((path_str.clone(), e.to_string())),
+            }
+        }
+
+        let _ = tx.send(DeleteMsg::Progress {
+            path: path_str,
+            freed,
+            done: i + 1,
+            total,
+        });
+    }
+
+    let _ = tx.send(DeleteMsg::Done { freed, errors });
+}
+
+// ─── Classic indicatif-based deletion (used for auto mode) ───────────────────
+
 /// Delete the given targets, showing a progress bar.
 /// In dry-run mode, only prints what would be deleted.
 pub fn delete_targets(targets: &[CleanTarget], dry_run: bool) -> anyhow::Result<()> {

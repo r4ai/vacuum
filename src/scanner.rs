@@ -9,6 +9,35 @@ use crate::adapters::{
 };
 use crate::cli::Cli;
 
+/// Scanner settings extracted from CLI flags.
+/// This is `Clone + Send + 'static`, enabling use across thread boundaries.
+#[derive(Clone, Debug)]
+pub struct ScanConfig {
+    pub no_size: bool,
+    pub node: bool,
+    pub cargo: bool,
+    pub python: bool,
+    pub go: bool,
+    pub gradle: bool,
+    pub maven: bool,
+    pub gitignore: bool,
+}
+
+impl From<&Cli> for ScanConfig {
+    fn from(cli: &Cli) -> Self {
+        Self {
+            no_size: cli.no_size,
+            node: cli.node,
+            cargo: cli.cargo,
+            python: cli.python,
+            go: cli.go,
+            gradle: cli.gradle,
+            maven: cli.maven,
+            gitignore: cli.gitignore,
+        }
+    }
+}
+
 /// Build the list of enabled adapters from CLI flags.
 pub fn build_adapters(cli: &Cli) -> Vec<Box<dyn Adapter>> {
     let mut adapters: Vec<Box<dyn Adapter>> = Vec::new();
@@ -119,15 +148,45 @@ fn has_python_source_file_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path)
 }
 
 /// Scan enabled adapters with a single directory walk for core adapters.
-/// Gitignore adapter is still executed separately due matcher semantics.
+/// Gitignore adapter is still executed separately due to matcher semantics.
 pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> {
-    let core_enabled = cli.node || cli.cargo || cli.python || cli.go || cli.gradle || cli.maven;
+    let cfg = ScanConfig::from(cli);
+    let mut all: Vec<CleanTarget> = Vec::new();
+    scan_streaming(root, &cfg, &mut |t| all.push(t))?;
+    all.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(all)
+}
+
+/// Stream discovered targets one-by-one via a callback.
+/// Callers that need to run this off the main thread should wrap it in
+/// `std::thread::spawn` and pass a closure that sends through an `mpsc` channel.
+pub fn scan_streaming(
+    root: &Path,
+    cfg: &ScanConfig,
+    on_found: &mut dyn FnMut(CleanTarget),
+) -> anyhow::Result<()> {
+    let core_enabled =
+        cfg.node || cfg.cargo || cfg.python || cfg.go || cfg.gradle || cfg.maven;
+    if !core_enabled && !cfg.gitignore {
+        return Ok(());
+    }
     if !core_enabled {
-        let adapters = build_adapters(cli);
-        return scan(root, &adapters);
+        // Only gitignore is enabled — fall back to the adapter scan path.
+        let gitignore = GitignoreAdapter;
+        match gitignore.scan(root) {
+            Ok(targets) => {
+                for mut target in targets {
+                    if cfg.no_size {
+                        target.size = 0;
+                    }
+                    on_found(target);
+                }
+            }
+            Err(e) => eprintln!("Warning: adapter '{}' failed: {e}", gitignore.name()),
+        }
+        return Ok(());
     }
 
-    let mut all: Vec<CleanTarget> = Vec::new();
     let mut seen_paths: HashSet<PathBuf> = HashSet::new();
     let mut iter = WalkDir::new(root).follow_links(false).into_iter();
     let mut node_context_cache: HashMap<PathBuf, bool> = HashMap::new();
@@ -153,20 +212,20 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
             };
             let mut matched: Option<(&'static str, String)> = None;
 
-            if cli.node
+            if cfg.node
                 && name == "node_modules"
                 && has_file_cached(&mut node_context_cache, parent, "package.json")
             {
                 matched = Some(("node", "Node.js dependencies (node_modules/)".into()));
             }
             if matched.is_none()
-                && cli.cargo
+                && cfg.cargo
                 && name == "target"
                 && has_file_cached(&mut cargo_context_cache, parent, "Cargo.toml")
             {
                 matched = Some(("cargo", "Cargo build artifacts (target/)".into()));
             }
-            if matched.is_none() && cli.python && PYTHON_DIR_TARGETS.contains(&name.as_ref()) {
+            if matched.is_none() && cfg.python && PYTHON_DIR_TARGETS.contains(&name.as_ref()) {
                 let has_context = if name == "__pycache__" {
                     let mut p = parent;
                     let mut found = false;
@@ -190,21 +249,21 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
                 }
             }
             if matched.is_none()
-                && cli.go
+                && cfg.go
                 && name == "vendor"
                 && has_file_cached(&mut go_context_cache, parent, "go.mod")
             {
                 matched = Some(("go", "Go vendor directory (vendor/)".into()));
             }
             if matched.is_none()
-                && cli.gradle
+                && cfg.gradle
                 && (name == ".gradle" || name == "build")
                 && has_gradle_context_cached(&mut gradle_context_cache, parent)
             {
                 matched = Some(("gradle", format!("Gradle build artifact ({name}/)")));
             }
             if matched.is_none()
-                && cli.maven
+                && cfg.maven
                 && name == "target"
                 && has_file_cached(&mut maven_context_cache, parent, "pom.xml")
             {
@@ -214,12 +273,12 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
             if let Some((adapter, description)) = matched {
                 let path_buf = path.to_path_buf();
                 if seen_paths.insert(path_buf.clone()) {
-                    let size = if cli.no_size {
+                    let size = if cfg.no_size {
                         0
                     } else {
                         compute_dir_size(path)
                     };
-                    all.push(CleanTarget {
+                    on_found(CleanTarget {
                         path: path_buf,
                         adapter,
                         description,
@@ -228,17 +287,17 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
                 }
                 iter.skip_current_dir();
             }
-        } else if entry.file_type().is_file() && cli.python {
+        } else if entry.file_type().is_file() && cfg.python {
             let name = entry.file_name().to_string_lossy();
             if name.ends_with(".pyc") {
                 let path_buf = path.to_path_buf();
                 if seen_paths.insert(path_buf.clone()) {
-                    let size = if cli.no_size {
+                    let size = if cfg.no_size {
                         0
                     } else {
                         entry.metadata().map(|m| m.len()).unwrap_or(0)
                     };
-                    all.push(CleanTarget {
+                    on_found(CleanTarget {
                         path: path_buf,
                         adapter: "python",
                         description: "Python bytecode (.pyc)".into(),
@@ -249,27 +308,24 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
         }
     }
 
-    if cli.gitignore {
+    if cfg.gitignore {
         let gitignore = GitignoreAdapter;
         match gitignore.scan(root) {
             Ok(targets) => {
                 for mut target in targets {
                     if seen_paths.insert(target.path.clone()) {
-                        if cli.no_size {
+                        if cfg.no_size {
                             target.size = 0;
                         }
-                        all.push(target);
+                        on_found(target);
                     }
                 }
             }
-            Err(e) => {
-                eprintln!("Warning: adapter '{}' failed: {e}", gitignore.name());
-            }
+            Err(e) => eprintln!("Warning: adapter '{}' failed: {e}", gitignore.name()),
         }
     }
 
-    all.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(all)
+    Ok(())
 }
 
 #[cfg(test)]
