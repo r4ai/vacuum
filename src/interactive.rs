@@ -138,6 +138,9 @@ struct App<'a> {
     mode: Mode,
     filter_query: String,
     help_state: ListState,
+    help_filter: String,
+    help_order: Vec<usize>, // filtered indices into KEYBINDINGS
+    help_searching: bool,   // true when typing in help search bar
 }
 
 impl<'a> App<'a> {
@@ -164,6 +167,9 @@ impl<'a> App<'a> {
             mode: Mode::Normal,
             filter_query: String::new(),
             help_state,
+            help_filter: String::new(),
+            help_order: (0..KEYBINDINGS.len()).collect(),
+            help_searching: false,
         };
         app.apply_sort();
         app
@@ -355,15 +361,40 @@ impl<'a> App<'a> {
         self.clamp_cursor();
     }
 
+    fn apply_help_filter(&mut self) {
+        let q = self.help_filter.to_lowercase();
+        self.help_order = if q.is_empty() {
+            (0..KEYBINDINGS.len()).collect()
+        } else {
+            KEYBINDINGS
+                .iter()
+                .enumerate()
+                .filter(|(_, kb)| {
+                    kb.key.to_lowercase().contains(&q) || kb.desc.to_lowercase().contains(&q)
+                })
+                .map(|(i, _)| i)
+                .collect()
+        };
+        let len = self.help_order.len();
+        if len == 0 {
+            self.help_state.select(None);
+        } else {
+            let cur = self.help_state.selected().unwrap_or(0).min(len - 1);
+            self.help_state.select(Some(cur));
+        }
+    }
+
     fn help_move_up(&mut self) {
-        let len = KEYBINDINGS.len();
+        let len = self.help_order.len();
+        if len == 0 { return; }
         let cur = self.help_state.selected().unwrap_or(0);
         self.help_state
             .select(Some(if cur == 0 { len - 1 } else { cur - 1 }));
     }
 
     fn help_move_down(&mut self) {
-        let len = KEYBINDINGS.len();
+        let len = self.help_order.len();
+        if len == 0 { return; }
         let cur = self.help_state.selected().unwrap_or(0);
         self.help_state
             .select(Some(if cur + 1 >= len { 0 } else { cur + 1 }));
@@ -690,7 +721,7 @@ fn render_help_overlay(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
-        .title(" Keybindings  [↑↓/jk] Navigate  [Enter] Execute  [?/q/Esc] Close ")
+        .title(" Keybindings  [↑↓/jk] Navigate  [Enter] Execute  [/] Search  [?/q/Esc] Close ")
         .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
@@ -698,9 +729,40 @@ fn render_help_overlay(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let items: Vec<ListItem> = KEYBINDINGS
+    // Split inner area: list on top, search bar at bottom
+    let inner_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
+    // Search bar
+    let (search_text, search_style) = if app.help_searching {
+        (
+            format!(" / {}█", app.help_filter),
+            Style::default().fg(Color::White),
+        )
+    } else if !app.help_filter.is_empty() {
+        (
+            format!(" / {} (press / to edit, Esc to clear)", app.help_filter),
+            Style::default().fg(Color::Yellow),
+        )
+    } else {
+        (
+            " / type to filter keybindings".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )
+    };
+    frame.render_widget(
+        Paragraph::new(search_text).style(search_style),
+        inner_chunks[1],
+    );
+
+    // Keybinding list (filtered)
+    let items: Vec<ListItem> = app
+        .help_order
         .iter()
-        .map(|kb| {
+        .map(|&kb_i| {
+            let kb = &KEYBINDINGS[kb_i];
             ListItem::new(Line::from(vec![
                 Span::styled(
                     format!("{:<12}", kb.key),
@@ -719,7 +781,7 @@ fn render_help_overlay(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
         )
         .highlight_symbol("► ");
 
-    frame.render_stateful_widget(list, inner, &mut app.help_state);
+    frame.render_stateful_widget(list, inner_chunks[0], &mut app.help_state);
 }
 
 // ─── Event handling ───────────────────────────────────────────────────────────
@@ -809,9 +871,40 @@ fn handle_search_key(app: &mut App, key: KeyEvent) {
 }
 
 fn handle_help_key(app: &mut App, key: KeyEvent) -> ActionResult {
+    // If currently typing in the help search bar, handle input first
+    if app.help_searching {
+        match key.code {
+            KeyCode::Esc => {
+                app.help_filter.clear();
+                app.apply_help_filter();
+                app.help_searching = false;
+            }
+            KeyCode::Enter => {
+                app.help_searching = false;
+            }
+            KeyCode::Backspace => {
+                app.help_filter.pop();
+                app.apply_help_filter();
+            }
+            KeyCode::Char(c) => {
+                app.help_filter.push(c);
+                app.apply_help_filter();
+            }
+            _ => {}
+        }
+        return ActionResult::Continue;
+    }
+
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('?') => {
+            app.help_filter.clear();
+            app.apply_help_filter();
+            app.help_searching = false;
             app.mode = Mode::Normal;
+            ActionResult::Continue
+        }
+        KeyCode::Char('/') => {
+            app.help_searching = true;
             ActionResult::Continue
         }
         KeyCode::Up | KeyCode::Char('k') => {
@@ -823,10 +916,13 @@ fn handle_help_key(app: &mut App, key: KeyEvent) -> ActionResult {
             ActionResult::Continue
         }
         KeyCode::Enter => {
-            let idx = app.help_state.selected().unwrap_or(0);
-            let action = KEYBINDINGS[idx].action;
+            let display_idx = app.help_state.selected().unwrap_or(0);
+            let kb_idx = app.help_order.get(display_idx).copied().unwrap_or(0);
+            let action = KEYBINDINGS[kb_idx].action;
+            app.help_filter.clear();
+            app.apply_help_filter();
+            app.help_searching = false;
             app.mode = Mode::Normal;
-            // OpenHelp from help just closes; don't toggle back to Help
             if matches!(action, Action::OpenHelp) {
                 ActionResult::Continue
             } else {
