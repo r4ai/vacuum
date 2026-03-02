@@ -75,7 +75,9 @@ vacuum --generate-completions zsh > ~/.local/share/zsh/site-functions/_vacuum
 vacuum --generate-completions bash > ~/.local/share/bash-completion/completions/vacuum
 ```
 
-## 新しいアダプターの追加
+## 開発
+
+### アダプターの追加
 
 1. `src/adapters/` に新しいファイルを作成する
 2. `Adapter` トレイトを実装する
