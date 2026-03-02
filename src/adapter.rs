@@ -70,6 +70,9 @@ mod tests {
         fs::write(dir.path().join("a.txt"), a).unwrap();
         fs::create_dir(dir.path().join("sub")).unwrap();
         fs::write(dir.path().join("sub").join("b.txt"), b_data).unwrap();
-        assert_eq!(compute_dir_size(dir.path()), (a.len() + b_data.len()) as u64);
+        assert_eq!(
+            compute_dir_size(dir.path()),
+            (a.len() + b_data.len()) as u64
+        );
     }
 }

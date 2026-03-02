@@ -68,7 +68,10 @@ mod tests {
         fs::write(root.join("go.mod"), "module example.com/app\n\ngo 1.21").unwrap();
         fs::create_dir_all(root.join("vendor").join("github.com").join("pkg")).unwrap();
         fs::write(
-            root.join("vendor").join("github.com").join("pkg").join("lib.go"),
+            root.join("vendor")
+                .join("github.com")
+                .join("pkg")
+                .join("lib.go"),
             "package pkg",
         )
         .unwrap();

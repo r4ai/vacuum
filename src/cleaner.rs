@@ -1,7 +1,7 @@
-use std::fs;
 use anyhow::Context as _;
 use bytesize::ByteSize;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::fs;
 
 use crate::adapter::CleanTarget;
 

@@ -1,6 +1,6 @@
+use ignore::gitignore::GitignoreBuilder;
 use std::path::Path;
 use walkdir::WalkDir;
-use ignore::gitignore::GitignoreBuilder;
 
 use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
 
@@ -45,10 +45,7 @@ impl Adapter for GitignoreAdapter {
             }
 
             // Skip .git directory
-            if path
-                .components()
-                .any(|c| c.as_os_str() == ".git")
-            {
+            if path.components().any(|c| c.as_os_str() == ".git") {
                 continue;
             }
 
@@ -126,7 +123,11 @@ mod tests {
         fs::create_dir_all(dir.path().join(".git").join("objects")).unwrap();
 
         let targets = GitignoreAdapter.scan(dir.path()).unwrap();
-        assert!(targets.iter().all(|t| !t.path.starts_with(dir.path().join(".git"))));
+        assert!(
+            targets
+                .iter()
+                .all(|t| !t.path.starts_with(dir.path().join(".git")))
+        );
     }
 
     #[test]
@@ -154,8 +155,16 @@ mod tests {
         fs::write(dir.path().join("main.rs"), "").unwrap();
 
         let targets = GitignoreAdapter.scan(dir.path()).unwrap();
-        assert!(targets.iter().any(|t| t.path == dir.path().join("debug.log")));
-        assert!(targets.iter().any(|t| t.path == dir.path().join("temp.tmp")));
+        assert!(
+            targets
+                .iter()
+                .any(|t| t.path == dir.path().join("debug.log"))
+        );
+        assert!(
+            targets
+                .iter()
+                .any(|t| t.path == dir.path().join("temp.tmp"))
+        );
         assert!(targets.iter().all(|t| t.path != dir.path().join("main.rs")));
     }
 }

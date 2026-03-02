@@ -67,7 +67,11 @@ mod tests {
     fn make_maven_project(root: &std::path::Path) {
         fs::write(root.join("pom.xml"), "<project/>").unwrap();
         fs::create_dir_all(root.join("target").join("classes")).unwrap();
-        fs::write(root.join("target").join("classes").join("App.class"), b"cafebabe").unwrap();
+        fs::write(
+            root.join("target").join("classes").join("App.class"),
+            b"cafebabe",
+        )
+        .unwrap();
     }
 
     #[test]

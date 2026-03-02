@@ -6,7 +6,12 @@ use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
 pub struct PythonAdapter;
 
 const PYTHON_DIR_TARGETS: &[&str] = &["__pycache__", ".venv", "venv", "dist", "build", ".eggs"];
-const PYTHON_CONTEXT_FILES: &[&str] = &["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"];
+const PYTHON_CONTEXT_FILES: &[&str] = &[
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "requirements.txt",
+];
 
 fn has_python_context(dir: &Path) -> bool {
     PYTHON_CONTEXT_FILES.iter().any(|f| dir.join(f).exists())
@@ -66,9 +71,12 @@ impl Adapter for PythonAdapter {
                         }
                     }
                     // Also accept if there are .py files in same directory
-                    found || parent.read_dir().is_ok_and(|mut d| {
-                        d.any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "py")))
-                    })
+                    found
+                        || parent.read_dir().is_ok_and(|mut d| {
+                            d.any(|e| {
+                                e.is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "py"))
+                            })
+                        })
                 } else {
                     has_python_context(parent)
                 };
@@ -117,7 +125,11 @@ mod tests {
         fs::create_dir(dir.path().join("__pycache__")).unwrap();
 
         let targets = PythonAdapter.scan(dir.path()).unwrap();
-        assert!(targets.iter().any(|t| t.path == dir.path().join("__pycache__")));
+        assert!(
+            targets
+                .iter()
+                .any(|t| t.path == dir.path().join("__pycache__"))
+        );
     }
 
     #[test]
@@ -222,7 +234,10 @@ mod tests {
         fs::create_dir(venv.join("__pycache__")).unwrap();
 
         let targets = PythonAdapter.scan(dir.path()).unwrap();
-        let venv_count = targets.iter().filter(|t| t.path == dir.path().join(".venv")).count();
+        let venv_count = targets
+            .iter()
+            .filter(|t| t.path == dir.path().join(".venv"))
+            .count();
         let inner_pycache_count = targets
             .iter()
             .filter(|t| t.path == venv.join("__pycache__"))

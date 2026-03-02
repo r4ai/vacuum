@@ -1,6 +1,6 @@
-use std::path::Path;
 use bytesize::ByteSize;
 use owo_colors::{OwoColorize, Stream};
+use std::path::Path;
 
 use crate::adapter::CleanTarget;
 
@@ -22,16 +22,14 @@ pub fn print_targets(targets: &[CleanTarget], root: &Path) {
         targets
             .len()
             .if_supports_color(Stream::Stdout, |t| t.yellow()),
-        format!("({})", ByteSize(total))
-            .if_supports_color(Stream::Stdout, |t| t.bright_black()),
+        format!("({})", ByteSize(total)).if_supports_color(Stream::Stdout, |t| t.bright_black()),
     );
 
     for t in targets {
         let rel = t.path.strip_prefix(root).unwrap_or(&t.path);
         println!(
             "  {}  {}  {}",
-            format!("[{}]", t.adapter)
-                .if_supports_color(Stream::Stdout, |s| s.cyan()),
+            format!("[{}]", t.adapter).if_supports_color(Stream::Stdout, |s| s.cyan()),
             rel.display(),
             format!("({})", ByteSize(t.size))
                 .if_supports_color(Stream::Stdout, |s| s.bright_black()),
