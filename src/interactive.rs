@@ -638,7 +638,8 @@ fn render_table(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                     .bg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD)
             } else if is_in_visual {
-                Style::default().bg(Color::DarkGray)
+                // Explicit white fg so uncolored text stays readable on DarkGray bg
+                Style::default().bg(Color::DarkGray).fg(Color::White)
             } else {
                 Style::default()
             };
