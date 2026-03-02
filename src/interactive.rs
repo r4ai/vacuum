@@ -3,19 +3,23 @@ use std::path::Path;
 
 use anyhow::Context as _;
 use bytesize::ByteSize;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use crossterm::{execute, ExecutableCommand as _};
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+};
 use ratatui::Terminal;
 
 use crate::adapter::CleanTarget;
+
+// ─── Sort ────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SortColumn {
@@ -47,33 +51,114 @@ impl SortDir {
     }
 }
 
+// ─── Mode / Action ───────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Normal,
+    Search,
+    Help,
+}
+
+#[derive(Clone, Copy)]
+enum Action {
+    MoveUp,
+    MoveDown,
+    MoveTop,
+    MoveBottom,
+    MovePageUp,
+    MovePageDown,
+    MoveHalfPageUp,
+    MoveHalfPageDown,
+    Toggle,
+    SelectAll,
+    SelectNone,
+    SortByAdapter,
+    SortByPath,
+    SortBySize,
+    SortByDescription,
+    OpenSearch,
+    OpenHelp,
+    Confirm,
+    Quit,
+}
+
+enum ActionResult {
+    Continue,
+    Confirm,
+    Quit,
+}
+
+// ─── Keybinding registry ─────────────────────────────────────────────────────
+
+struct KeyBinding {
+    key: &'static str,
+    desc: &'static str,
+    action: Action,
+}
+
+static KEYBINDINGS: &[KeyBinding] = &[
+    KeyBinding { key: "↑ / k",    desc: "Move cursor up",           action: Action::MoveUp },
+    KeyBinding { key: "↓ / j",    desc: "Move cursor down",         action: Action::MoveDown },
+    KeyBinding { key: "PgUp",     desc: "Page up",                  action: Action::MovePageUp },
+    KeyBinding { key: "PgDn",     desc: "Page down",                action: Action::MovePageDown },
+    KeyBinding { key: "Ctrl+u",   desc: "Half page up",             action: Action::MoveHalfPageUp },
+    KeyBinding { key: "Ctrl+d",   desc: "Half page down",           action: Action::MoveHalfPageDown },
+    KeyBinding { key: "g / Home", desc: "Jump to top",              action: Action::MoveTop },
+    KeyBinding { key: "G / End",  desc: "Jump to bottom",           action: Action::MoveBottom },
+    KeyBinding { key: "Space",    desc: "Toggle item selection",    action: Action::Toggle },
+    KeyBinding { key: "a",        desc: "Select all items",         action: Action::SelectAll },
+    KeyBinding { key: "n",        desc: "Deselect all items",       action: Action::SelectNone },
+    KeyBinding { key: "1",        desc: "Sort by Adapter",          action: Action::SortByAdapter },
+    KeyBinding { key: "2",        desc: "Sort by Path",             action: Action::SortByPath },
+    KeyBinding { key: "3",        desc: "Sort by Size",             action: Action::SortBySize },
+    KeyBinding { key: "4",        desc: "Sort by Description",      action: Action::SortByDescription },
+    KeyBinding { key: "/",        desc: "Filter items",             action: Action::OpenSearch },
+    KeyBinding { key: "?",        desc: "Toggle this help screen",  action: Action::OpenHelp },
+    KeyBinding { key: "Enter",    desc: "Confirm and delete",       action: Action::Confirm },
+    KeyBinding { key: "q / Esc",  desc: "Quit without deleting",    action: Action::Quit },
+];
+
+// ─── App state ───────────────────────────────────────────────────────────────
+
 struct App<'a> {
     targets: &'a [CleanTarget],
     root: &'a Path,
-    selected: Vec<bool>, // indexed by original target index
-    order: Vec<usize>,   // display row -> original target index
+    selected: Vec<bool>,      // indexed by original target index
+    sorted_order: Vec<usize>, // all indices in current sort order
+    order: Vec<usize>,        // sorted_order filtered by filter_query
     table_state: TableState,
     sort_col: SortColumn,
     sort_dir: SortDir,
     page_size: usize, // updated each frame from rendered area
+    mode: Mode,
+    filter_query: String,
+    help_state: ListState,
 }
 
 impl<'a> App<'a> {
     fn new(targets: &'a [CleanTarget], root: &'a Path) -> Self {
-        let order: Vec<usize> = (0..targets.len()).collect();
+        let sorted_order: Vec<usize> = (0..targets.len()).collect();
+        let order = sorted_order.clone();
         let mut table_state = TableState::default();
         if !targets.is_empty() {
             table_state.select(Some(0));
         }
+        let mut help_state = ListState::default();
+        help_state.select(Some(0));
         let mut app = Self {
             targets,
             root,
             selected: vec![true; targets.len()],
+            sorted_order,
             order,
             table_state,
             sort_col: SortColumn::Path,
             sort_dir: SortDir::Asc,
             page_size: 10,
+            mode: Mode::Normal,
+            filter_query: String::new(),
+            help_state,
         };
         app.apply_sort();
         app
@@ -95,22 +180,16 @@ impl<'a> App<'a> {
 
     fn move_up(&mut self) {
         let len = self.order.len();
-        if len == 0 {
-            return;
-        }
+        if len == 0 { return; }
         let cur = self.cursor();
-        let next = if cur == 0 { len - 1 } else { cur - 1 };
-        self.table_state.select(Some(next));
+        self.table_state.select(Some(if cur == 0 { len - 1 } else { cur - 1 }));
     }
 
     fn move_down(&mut self) {
         let len = self.order.len();
-        if len == 0 {
-            return;
-        }
+        if len == 0 { return; }
         let cur = self.cursor();
-        let next = if cur + 1 >= len { 0 } else { cur + 1 };
-        self.table_state.select(Some(next));
+        self.table_state.select(Some(if cur + 1 >= len { 0 } else { cur + 1 }));
     }
 
     fn move_top(&mut self) {
@@ -128,36 +207,28 @@ impl<'a> App<'a> {
 
     fn move_page_up(&mut self) {
         let len = self.order.len();
-        if len == 0 {
-            return;
-        }
+        if len == 0 { return; }
         let next = self.cursor().saturating_sub(self.page_size);
         self.table_state.select(Some(next));
     }
 
     fn move_page_down(&mut self) {
         let len = self.order.len();
-        if len == 0 {
-            return;
-        }
+        if len == 0 { return; }
         let next = (self.cursor() + self.page_size).min(len - 1);
         self.table_state.select(Some(next));
     }
 
     fn move_half_page_up(&mut self) {
         let len = self.order.len();
-        if len == 0 {
-            return;
-        }
+        if len == 0 { return; }
         let next = self.cursor().saturating_sub(self.page_size / 2);
         self.table_state.select(Some(next));
     }
 
     fn move_half_page_down(&mut self) {
         let len = self.order.len();
-        if len == 0 {
-            return;
-        }
+        if len == 0 { return; }
         let next = (self.cursor() + self.page_size / 2).min(len - 1);
         self.table_state.select(Some(next));
     }
@@ -192,8 +263,7 @@ impl<'a> App<'a> {
         let root = self.root;
         let col = self.sort_col;
         let dir = self.sort_dir;
-
-        self.order.sort_by(|&a, &b| {
+        self.sorted_order.sort_by(|&a, &b| {
             let ta = &targets[a];
             let tb = &targets[b];
             let cmp = match col {
@@ -208,7 +278,75 @@ impl<'a> App<'a> {
             };
             if dir == SortDir::Desc { cmp.reverse() } else { cmp }
         });
+        self.apply_filter();
+    }
+
+    fn apply_filter(&mut self) {
+        let query = self.filter_query.to_lowercase();
+        if query.is_empty() {
+            self.order = self.sorted_order.clone();
+        } else {
+            let targets = self.targets;
+            let root = self.root;
+            self.order = self
+                .sorted_order
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    let t = &targets[i];
+                    let rel = t.path.strip_prefix(root).unwrap_or(&t.path);
+                    t.adapter.to_lowercase().contains(&query)
+                        || rel.to_string_lossy().to_lowercase().contains(&query)
+                        || t.description.to_lowercase().contains(&query)
+                })
+                .collect();
+        }
         self.clamp_cursor();
+    }
+
+    fn help_move_up(&mut self) {
+        let len = KEYBINDINGS.len();
+        let cur = self.help_state.selected().unwrap_or(0);
+        self.help_state
+            .select(Some(if cur == 0 { len - 1 } else { cur - 1 }));
+    }
+
+    fn help_move_down(&mut self) {
+        let len = KEYBINDINGS.len();
+        let cur = self.help_state.selected().unwrap_or(0);
+        self.help_state
+            .select(Some(if cur + 1 >= len { 0 } else { cur + 1 }));
+    }
+
+    fn execute_action(&mut self, action: Action) -> ActionResult {
+        match action {
+            Action::MoveUp => self.move_up(),
+            Action::MoveDown => self.move_down(),
+            Action::MoveTop => self.move_top(),
+            Action::MoveBottom => self.move_bottom(),
+            Action::MovePageUp => self.move_page_up(),
+            Action::MovePageDown => self.move_page_down(),
+            Action::MoveHalfPageUp => self.move_half_page_up(),
+            Action::MoveHalfPageDown => self.move_half_page_down(),
+            Action::Toggle => self.toggle(),
+            Action::SelectAll => self.select_all(),
+            Action::SelectNone => self.select_none(),
+            Action::SortByAdapter => self.sort_by(SortColumn::Adapter),
+            Action::SortByPath => self.sort_by(SortColumn::Path),
+            Action::SortBySize => self.sort_by(SortColumn::Size),
+            Action::SortByDescription => self.sort_by(SortColumn::Description),
+            Action::OpenSearch => self.mode = Mode::Search,
+            Action::OpenHelp => {
+                self.mode = if self.mode == Mode::Help {
+                    Mode::Normal
+                } else {
+                    Mode::Help
+                }
+            }
+            Action::Confirm => return ActionResult::Confirm,
+            Action::Quit => return ActionResult::Quit,
+        }
+        ActionResult::Continue
     }
 
     fn total_size(&self) -> u64 {
@@ -238,6 +376,23 @@ impl<'a> App<'a> {
     }
 }
 
+// ─── Rendering ───────────────────────────────────────────────────────────────
+
+fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
+    let vert = Layout::vertical([
+        Constraint::Percentage((100 - percent_y) / 2),
+        Constraint::Percentage(percent_y),
+        Constraint::Percentage((100 - percent_y) / 2),
+    ])
+    .split(area);
+    Layout::horizontal([
+        Constraint::Percentage((100 - percent_x) / 2),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage((100 - percent_x) / 2),
+    ])
+    .split(vert[1])[1]
+}
+
 fn render(frame: &mut ratatui::Frame, app: &mut App) {
     let area = frame.area();
 
@@ -246,29 +401,42 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
         .constraints([
             Constraint::Length(3), // header
             Constraint::Min(3),    // table
-            Constraint::Length(2), // stats
-            Constraint::Length(2), // keybind hint (2 lines)
+            Constraint::Length(1), // search bar
+            Constraint::Length(1), // stats
+            Constraint::Length(2), // hint
         ])
         .split(area);
 
-    // Update page_size from the visible table rows (subtract borders + header + margin)
+    // Update page_size from visible table rows (borders=2, header=1, margin=1)
     app.page_size = (chunks[1].height as usize).saturating_sub(4).max(1);
 
-    // --- Header ---
-    let header_block = Block::default()
+    render_header(frame, chunks[0]);
+    render_table(frame, app, chunks[1]);
+    render_search_bar(frame, app, chunks[2]);
+    render_stats(frame, app, chunks[3]);
+    render_hint(frame, chunks[4]);
+
+    if app.mode == Mode::Help {
+        render_help_overlay(frame, app, area);
+    }
+}
+
+fn render_header(frame: &mut ratatui::Frame, area: Rect) {
+    let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
-    let header_text = Paragraph::new(Line::from(vec![
+    let text = Paragraph::new(Line::from(vec![
         Span::styled(
             "vacuum",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ),
         Span::raw(" — Select items to delete"),
     ]))
-    .block(header_block);
-    frame.render_widget(header_text, chunks[0]);
+    .block(block);
+    frame.render_widget(text, area);
+}
 
-    // --- Table ---
+fn render_table(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
     let col_defs: &[(&str, SortColumn)] = &[
         ("Adapter", SortColumn::Adapter),
         ("Path", SortColumn::Path),
@@ -325,8 +493,7 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
                 Cell::from(check).style(check_style),
                 Cell::from(t.adapter),
                 Cell::from(rel.display().to_string()),
-                Cell::from(ByteSize(t.size).to_string())
-                    .style(Style::default().fg(Color::Cyan)),
+                Cell::from(ByteSize(t.size).to_string()).style(Style::default().fg(Color::Cyan)),
                 Cell::from(t.description.as_str()),
             ])
             .style(row_style)
@@ -344,33 +511,57 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
         .header(header_row)
         .block(Block::default().borders(Borders::ALL))
         .row_highlight_style(Style::default());
-    frame.render_stateful_widget(table, chunks[1], &mut app.table_state);
+    frame.render_stateful_widget(table, area, &mut app.table_state);
+}
 
-    // --- Stats ---
+fn render_search_bar(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+    let (text, style) = match app.mode {
+        Mode::Search => (
+            format!(" / {}█", app.filter_query),
+            Style::default().fg(Color::White),
+        ),
+        _ if !app.filter_query.is_empty() => (
+            format!(" / {} (active filter — press / to edit, Esc to clear)", app.filter_query),
+            Style::default().fg(Color::Yellow),
+        ),
+        _ => (
+            " / type to filter".to_string(),
+            Style::default().fg(Color::DarkGray),
+        ),
+    };
+    frame.render_widget(Paragraph::new(text).style(style), area);
+}
+
+fn render_stats(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     let sel_count = app.selected_count();
     let total_count = app.targets.len();
+    let visible_count = app.order.len();
     let sel_size = ByteSize(app.selected_size());
     let total_size = ByteSize(app.total_size());
-    let stats = Paragraph::new(Line::from(vec![
+
+    let mut spans = vec![
         Span::raw(" Selected: "),
         Span::styled(
             format!("{sel_size}"),
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(" / {total_size}   ")),
         Span::styled(
             format!("{sel_count}"),
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(" / {total_count} items")),
-    ]));
-    frame.render_widget(stats, chunks[2]);
+    ];
+    if visible_count < total_count {
+        spans.push(Span::styled(
+            format!("  ({visible_count} shown)"),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
 
-    // --- Keybind hint (2 lines) ---
+fn render_hint(frame: &mut ratatui::Frame, area: Rect) {
     let hint = Paragraph::new(vec![
         Line::from(vec![
             Span::styled(" [↑↓/jk]", Style::default().fg(Color::Yellow)),
@@ -387,18 +578,143 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
         Line::from(vec![
             Span::styled(" [Space]", Style::default().fg(Color::Yellow)),
             Span::raw(" Toggle  "),
-            Span::styled("[a]", Style::default().fg(Color::Yellow)),
-            Span::raw(" All  "),
-            Span::styled("[n]", Style::default().fg(Color::Yellow)),
-            Span::raw(" None  "),
+            Span::styled("[a/n]", Style::default().fg(Color::Yellow)),
+            Span::raw(" All/None  "),
+            Span::styled("[/]", Style::default().fg(Color::Yellow)),
+            Span::raw(" Filter  "),
+            Span::styled("[?]", Style::default().fg(Color::Yellow)),
+            Span::raw(" Help  "),
             Span::styled("[Enter]", Style::default().fg(Color::Green)),
             Span::raw(" Confirm  "),
-            Span::styled("[q/Esc]", Style::default().fg(Color::Red)),
+            Span::styled("[q]", Style::default().fg(Color::Red)),
             Span::raw(" Quit"),
         ]),
     ]);
-    frame.render_widget(hint, chunks[3]);
+    frame.render_widget(hint, area);
 }
+
+fn render_help_overlay(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
+    let popup = popup_area(area, 60, 80);
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(" Keybindings  [↑↓/jk] Navigate  [Enter] Execute  [?/q/Esc] Close ")
+        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let items: Vec<ListItem> = KEYBINDINGS
+        .iter()
+        .map(|kb| {
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("{:<12}", kb.key),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(kb.desc),
+            ]))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("► ");
+
+    frame.render_stateful_widget(list, inner, &mut app.help_state);
+}
+
+// ─── Event handling ───────────────────────────────────────────────────────────
+
+fn handle_normal_key(app: &mut App, key: KeyEvent) -> ActionResult {
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Esc => ActionResult::Quit,
+        KeyCode::Enter => ActionResult::Confirm,
+        KeyCode::Up | KeyCode::Char('k') => { app.move_up(); ActionResult::Continue }
+        KeyCode::Down | KeyCode::Char('j') => { app.move_down(); ActionResult::Continue }
+        KeyCode::PageUp => { app.move_page_up(); ActionResult::Continue }
+        KeyCode::PageDown => { app.move_page_down(); ActionResult::Continue }
+        KeyCode::Home | KeyCode::Char('g') => { app.move_top(); ActionResult::Continue }
+        KeyCode::End | KeyCode::Char('G') => { app.move_bottom(); ActionResult::Continue }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.move_half_page_up();
+            ActionResult::Continue
+        }
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.move_half_page_down();
+            ActionResult::Continue
+        }
+        KeyCode::Char(' ') => { app.toggle(); ActionResult::Continue }
+        KeyCode::Char('a') => { app.select_all(); ActionResult::Continue }
+        KeyCode::Char('n') => { app.select_none(); ActionResult::Continue }
+        KeyCode::Char('1') => { app.sort_by(SortColumn::Adapter); ActionResult::Continue }
+        KeyCode::Char('2') => { app.sort_by(SortColumn::Path); ActionResult::Continue }
+        KeyCode::Char('3') => { app.sort_by(SortColumn::Size); ActionResult::Continue }
+        KeyCode::Char('4') => { app.sort_by(SortColumn::Description); ActionResult::Continue }
+        KeyCode::Char('/') => { app.mode = Mode::Search; ActionResult::Continue }
+        KeyCode::Char('?') => { app.mode = Mode::Help; ActionResult::Continue }
+        _ => ActionResult::Continue,
+    }
+}
+
+fn handle_search_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.filter_query.clear();
+            app.apply_filter();
+            app.mode = Mode::Normal;
+        }
+        KeyCode::Enter => {
+            app.mode = Mode::Normal;
+        }
+        KeyCode::Backspace => {
+            app.filter_query.pop();
+            app.apply_filter();
+        }
+        KeyCode::Char(c) => {
+            app.filter_query.push(c);
+            app.apply_filter();
+        }
+        _ => {}
+    }
+}
+
+fn handle_help_key(app: &mut App, key: KeyEvent) -> ActionResult {
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('?') => {
+            app.mode = Mode::Normal;
+            ActionResult::Continue
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.help_move_up();
+            ActionResult::Continue
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.help_move_down();
+            ActionResult::Continue
+        }
+        KeyCode::Enter => {
+            let idx = app.help_state.selected().unwrap_or(0);
+            let action = KEYBINDINGS[idx].action;
+            app.mode = Mode::Normal;
+            // OpenHelp from help just closes; don't toggle back to Help
+            if matches!(action, Action::OpenHelp) {
+                ActionResult::Continue
+            } else {
+                app.execute_action(action)
+            }
+        }
+        _ => ActionResult::Continue,
+    }
+}
+
+// ─── Public entry point ───────────────────────────────────────────────────────
 
 /// Present an interactive multi-select table and return the targets
 /// the user chose for deletion.
@@ -437,40 +753,18 @@ fn run_loop(
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            match key.code {
-                KeyCode::Char('q') | KeyCode::Esc => return Ok(vec![]),
-                KeyCode::Enter => return Ok(app.chosen_targets()),
-
-                // Movement
-                KeyCode::Up | KeyCode::Char('k') => app.move_up(),
-                KeyCode::Down | KeyCode::Char('j') => app.move_down(),
-                KeyCode::PageUp => app.move_page_up(),
-                KeyCode::PageDown => app.move_page_down(),
-                KeyCode::Home | KeyCode::Char('g') => app.move_top(),
-                KeyCode::End | KeyCode::Char('G') => app.move_bottom(),
-                KeyCode::Char('u')
-                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    app.move_half_page_up()
+            let result = match app.mode {
+                Mode::Normal => handle_normal_key(app, key),
+                Mode::Search => {
+                    handle_search_key(app, key);
+                    ActionResult::Continue
                 }
-                KeyCode::Char('d')
-                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                {
-                    app.move_half_page_down()
-                }
-
-                // Selection
-                KeyCode::Char(' ') => app.toggle(),
-                KeyCode::Char('a') => app.select_all(),
-                KeyCode::Char('n') => app.select_none(),
-
-                // Sort by column (1=Adapter, 2=Path, 3=Size, 4=Description)
-                KeyCode::Char('1') => app.sort_by(SortColumn::Adapter),
-                KeyCode::Char('2') => app.sort_by(SortColumn::Path),
-                KeyCode::Char('3') => app.sort_by(SortColumn::Size),
-                KeyCode::Char('4') => app.sort_by(SortColumn::Description),
-
-                _ => {}
+                Mode::Help => handle_help_key(app, key),
+            };
+            match result {
+                ActionResult::Continue => {}
+                ActionResult::Confirm => return Ok(app.chosen_targets()),
+                ActionResult::Quit => return Ok(vec![]),
             }
         }
     }
