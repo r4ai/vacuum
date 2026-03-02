@@ -154,11 +154,15 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
     // Adapter list
     let items: Vec<ListItem> = ALL_ADAPTERS
         .iter()
-        .map(|entry| {
+        .enumerate()
+        .map(|(i, entry)| {
+            let is_cursor = i == state.cursor;
             let enabled = (entry.get)(&state.cfg);
             let check = if enabled { "✓" } else { "✗" };
             let check_style = if enabled {
                 Style::default().fg(Color::Green)
+            } else if is_cursor {
+                Style::default().fg(Color::Red)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
@@ -177,7 +181,7 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
                 ),
                 Span::styled(
                     entry.description,
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(Color::Gray),
                 ),
                 safe_badge,
             ]))
@@ -189,6 +193,7 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("► ");

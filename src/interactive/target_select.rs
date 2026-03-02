@@ -555,16 +555,17 @@ fn render_table(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
             let check = if sel { "✓" } else { "✗" };
             let check_style = if sel {
                 Style::default().fg(Color::Green)
+            } else if is_cursor || is_in_visual {
+                Style::default().fg(Color::Red)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
             let rel = t.path.strip_prefix(root.as_path()).unwrap_or(&t.path);
             let query = &app.filter_query;
-            let row_style = if is_cursor && app.mode == Mode::Visual {
-                Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-            } else if is_cursor {
+            let row_style = if is_cursor {
                 Style::default()
                     .bg(Color::DarkGray)
+                    .fg(Color::White)
                     .add_modifier(Modifier::BOLD)
             } else if is_in_visual {
                 Style::default().bg(Color::DarkGray).fg(Color::White)
@@ -757,6 +758,7 @@ fn render_help_overlay(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("► ");
