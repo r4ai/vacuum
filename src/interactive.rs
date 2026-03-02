@@ -466,6 +466,35 @@ impl<'a> App<'a> {
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
+/// Split `text` into spans, highlighting every occurrence of `query` (case-insensitive).
+fn highlight_matches(text: &str, query: &str) -> Line<'static> {
+    if query.is_empty() {
+        return Line::from(text.to_string());
+    }
+    let text_lower = text.to_lowercase();
+    let query_lower = query.to_lowercase();
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut pos = 0usize;
+    while let Some(rel) = text_lower[pos..].find(&query_lower) {
+        let start = pos + rel;
+        let end = start + query_lower.len();
+        if start > pos {
+            spans.push(Span::raw(text[pos..start].to_string()));
+        }
+        spans.push(Span::styled(
+            text[start..end].to_string(),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+        ));
+        pos = end;
+    }
+    if pos < text.len() {
+        spans.push(Span::raw(text[pos..].to_string()));
+    }
+    Line::from(spans)
+}
+
 fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
     let vert = Layout::vertical([
         Constraint::Percentage((100 - percent_y) / 2),
@@ -599,6 +628,7 @@ fn render_table(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                 Style::default().fg(Color::DarkGray)
             };
             let rel = t.path.strip_prefix(app.root).unwrap_or(&t.path);
+            let query = &app.filter_query;
             let row_style = if is_cursor && app.mode == Mode::Visual {
                 Style::default()
                     .bg(Color::Blue)
@@ -614,10 +644,10 @@ fn render_table(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
             };
             Row::new(vec![
                 Cell::from(check).style(check_style),
-                Cell::from(t.adapter),
-                Cell::from(rel.display().to_string()),
+                Cell::from(highlight_matches(t.adapter, query)),
+                Cell::from(highlight_matches(&rel.display().to_string(), query)),
                 Cell::from(ByteSize(t.size).to_string()).style(Style::default().fg(Color::Cyan)),
-                Cell::from(t.description.as_str()),
+                Cell::from(highlight_matches(&t.description, query)),
             ])
             .style(row_style)
         })
