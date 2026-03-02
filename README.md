@@ -32,6 +32,9 @@ vacuum ~/projects --mode auto
 
 # 削除せず候補を確認する
 vacuum ~/projects --dry-run
+
+# サイズ計算をスキップして高速スキャン
+vacuum ~/projects --mode auto --no-size
 ```
 
 ## アダプター
@@ -61,6 +64,11 @@ vacuum --node=false
 # gitignore アダプターを有効化（危険）
 vacuum --gitignore
 ```
+
+### スキャンを高速化する
+
+- `--no-size` を付けるとサイズ計算を省略する。巨大ディレクトリが多いときに有効。
+- 使わないアダプターは `--xxx=false` で無効化する。
 
 ## シェル補完
 

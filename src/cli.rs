@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use clap::{Parser, ValueEnum};
 use clap_complete::Shell;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -28,12 +28,15 @@ pub struct Cli {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Skip size calculation to speed up scanning [default: off]
+    #[arg(long, default_value_t = false, help_heading = "Performance")]
+    pub no_size: bool,
+
     /// Generate shell completions for the given shell and exit
     #[arg(long = "generate-completions", value_name = "SHELL")]
     pub generate_completions: Option<Shell>,
 
     // ---- Safe adapters (default: on) ----------------------------------------
-
     /// Node.js/npm adapter — removes node_modules/ [default: on]
     #[arg(
         long,
@@ -101,7 +104,6 @@ pub struct Cli {
     pub maven: bool,
 
     // ---- Dangerous adapters (default: off) -----------------------------------
-
     /// Gitignore adapter — removes all files matched by .gitignore (dangerous) [default: off]
     #[arg(
         long,

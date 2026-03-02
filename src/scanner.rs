@@ -214,7 +214,11 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
             if let Some((adapter, description)) = matched {
                 let path_buf = path.to_path_buf();
                 if seen_paths.insert(path_buf.clone()) {
-                    let size = compute_dir_size(path);
+                    let size = if cli.no_size {
+                        0
+                    } else {
+                        compute_dir_size(path)
+                    };
                     all.push(CleanTarget {
                         path: path_buf,
                         adapter,
@@ -229,7 +233,11 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
             if name.ends_with(".pyc") {
                 let path_buf = path.to_path_buf();
                 if seen_paths.insert(path_buf.clone()) {
-                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    let size = if cli.no_size {
+                        0
+                    } else {
+                        entry.metadata().map(|m| m.len()).unwrap_or(0)
+                    };
                     all.push(CleanTarget {
                         path: path_buf,
                         adapter: "python",
@@ -245,8 +253,11 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
         let gitignore = GitignoreAdapter;
         match gitignore.scan(root) {
             Ok(targets) => {
-                for target in targets {
+                for mut target in targets {
                     if seen_paths.insert(target.path.clone()) {
+                        if cli.no_size {
+                            target.size = 0;
+                        }
                         all.push(target);
                     }
                 }
@@ -367,6 +378,7 @@ mod tests {
             path: PathBuf::from("."),
             mode: Mode::Safe,
             dry_run: false,
+            no_size: false,
             generate_completions: None,
             node: true,
             cargo: true,
@@ -443,5 +455,24 @@ mod tests {
         cli.node = false;
         let results = scan_enabled(dir.path(), &cli).unwrap();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn scan_enabled_with_no_size_sets_size_to_zero() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("package.json"), "{}").unwrap();
+        fs::create_dir_all(dir.path().join("node_modules").join("pkg")).unwrap();
+        fs::write(
+            dir.path().join("node_modules").join("pkg").join("index.js"),
+            "x",
+        )
+        .unwrap();
+
+        let mut cli = enabled_cli();
+        cli.no_size = true;
+        let results = scan_enabled(dir.path(), &cli).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, dir.path().join("node_modules"));
+        assert_eq!(results[0].size, 0);
     }
 }
