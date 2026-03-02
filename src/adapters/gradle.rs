@@ -69,3 +69,70 @@ impl Adapter for GradleAdapter {
         Ok(targets)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn gradle_dir_with_build_gradle_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("build.gradle"), "plugins {}").unwrap();
+        fs::create_dir(dir.path().join(".gradle")).unwrap();
+
+        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        assert!(targets.iter().any(|t| t.path == dir.path().join(".gradle")));
+        assert_eq!(targets[0].adapter, "gradle");
+    }
+
+    #[test]
+    fn build_dir_with_build_gradle_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("build.gradle"), "plugins {}").unwrap();
+        fs::create_dir(dir.path().join("build")).unwrap();
+
+        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        assert!(targets.iter().any(|t| t.path == dir.path().join("build")));
+    }
+
+    #[test]
+    fn gradle_dir_with_build_gradle_kts_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("build.gradle.kts"), "plugins {}").unwrap();
+        fs::create_dir(dir.path().join(".gradle")).unwrap();
+
+        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        assert!(targets.iter().any(|t| t.path == dir.path().join(".gradle")));
+    }
+
+    #[test]
+    fn both_gradle_and_build_dirs_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("build.gradle"), "plugins {}").unwrap();
+        fs::create_dir(dir.path().join(".gradle")).unwrap();
+        fs::create_dir(dir.path().join("build")).unwrap();
+
+        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        assert_eq!(targets.len(), 2);
+    }
+
+    #[test]
+    fn gradle_dir_without_context_not_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join(".gradle")).unwrap();
+
+        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        assert!(targets.iter().all(|t| t.path != dir.path().join(".gradle")));
+    }
+
+    #[test]
+    fn build_dir_without_context_not_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("build")).unwrap();
+
+        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        assert!(targets.iter().all(|t| t.path != dir.path().join("build")));
+    }
+}

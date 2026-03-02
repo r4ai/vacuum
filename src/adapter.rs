@@ -41,3 +41,35 @@ pub fn compute_dir_size(path: &Path) -> u64 {
         .map(|m| m.len())
         .sum()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn compute_dir_size_empty_dir() {
+        let dir = TempDir::new().unwrap();
+        assert_eq!(compute_dir_size(dir.path()), 0);
+    }
+
+    #[test]
+    fn compute_dir_size_single_file() {
+        let dir = TempDir::new().unwrap();
+        let content = b"hello world";
+        fs::write(dir.path().join("file.txt"), content).unwrap();
+        assert_eq!(compute_dir_size(dir.path()), content.len() as u64);
+    }
+
+    #[test]
+    fn compute_dir_size_sums_nested_files() {
+        let dir = TempDir::new().unwrap();
+        let a = b"aaa";
+        let b_data = b"bb";
+        fs::write(dir.path().join("a.txt"), a).unwrap();
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        fs::write(dir.path().join("sub").join("b.txt"), b_data).unwrap();
+        assert_eq!(compute_dir_size(dir.path()), (a.len() + b_data.len()) as u64);
+    }
+}

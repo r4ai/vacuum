@@ -85,3 +85,81 @@ impl Adapter for GitignoreAdapter {
         Ok(targets)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn no_gitignore_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("app.log"), "log").unwrap();
+        let targets = GitignoreAdapter.scan(dir.path()).unwrap();
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn gitignore_matching_file_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), "*.log\n").unwrap();
+        fs::write(dir.path().join("app.log"), "log content").unwrap();
+        fs::write(dir.path().join("app.py"), "# not ignored").unwrap();
+
+        let targets = GitignoreAdapter.scan(dir.path()).unwrap();
+        assert!(targets.iter().any(|t| t.path == dir.path().join("app.log")));
+        assert!(targets.iter().all(|t| t.path != dir.path().join("app.py")));
+    }
+
+    #[test]
+    fn gitignore_matching_directory_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), "dist/\n").unwrap();
+        fs::create_dir_all(dir.path().join("dist").join("assets")).unwrap();
+        fs::write(dir.path().join("dist").join("bundle.js"), "").unwrap();
+
+        let targets = GitignoreAdapter.scan(dir.path()).unwrap();
+        assert!(targets.iter().any(|t| t.path == dir.path().join("dist")));
+    }
+
+    #[test]
+    fn git_dir_excluded_even_if_gitignore_would_match() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), ".git/\n").unwrap();
+        fs::create_dir_all(dir.path().join(".git").join("objects")).unwrap();
+
+        let targets = GitignoreAdapter.scan(dir.path()).unwrap();
+        assert!(targets.iter().all(|t| !t.path.starts_with(dir.path().join(".git"))));
+    }
+
+    #[test]
+    fn contents_of_matched_dir_not_listed_separately() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), "build/\n").unwrap();
+        fs::create_dir_all(dir.path().join("build").join("output")).unwrap();
+        fs::write(dir.path().join("build").join("app.js"), "").unwrap();
+
+        let targets = GitignoreAdapter.scan(dir.path()).unwrap();
+        let build_related: Vec<_> = targets
+            .iter()
+            .filter(|t| t.path.starts_with(dir.path().join("build")))
+            .collect();
+        assert_eq!(build_related.len(), 1);
+        assert_eq!(build_related[0].path, dir.path().join("build"));
+    }
+
+    #[test]
+    fn multiple_patterns_each_matched() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), "*.log\n*.tmp\n").unwrap();
+        fs::write(dir.path().join("debug.log"), "").unwrap();
+        fs::write(dir.path().join("temp.tmp"), "").unwrap();
+        fs::write(dir.path().join("main.rs"), "").unwrap();
+
+        let targets = GitignoreAdapter.scan(dir.path()).unwrap();
+        assert!(targets.iter().any(|t| t.path == dir.path().join("debug.log")));
+        assert!(targets.iter().any(|t| t.path == dir.path().join("temp.tmp")));
+        assert!(targets.iter().all(|t| t.path != dir.path().join("main.rs")));
+    }
+}

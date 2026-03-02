@@ -672,6 +672,7 @@ dependencies = [
  "ignore",
  "indicatif",
  "owo-colors",
+ "tempfile",
  "walkdir",
 ]
 
