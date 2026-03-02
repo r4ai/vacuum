@@ -80,8 +80,14 @@ fn run_loop(
                 }
             }
             Phase::Deleting(s) => {
+                let was_finished = s.finished;
                 s.drain();
-                // Auto-transition when deletion completes — wait for user to dismiss
+                // Auto-exit after Done state has been rendered at least once
+                if was_finished && s.finished {
+                    let freed = s.freed;
+                    let errors = std::mem::take(&mut s.errors);
+                    return Ok(TuiResult::Completed { freed, errors });
+                }
             }
             _ => {}
         }

@@ -180,10 +180,10 @@ fn render_delete_body(frame: &mut ratatui::Frame, state: &DeletingState, area: R
 
 fn render_delete_hint(frame: &mut ratatui::Frame, area: Rect, finished: bool) {
     let hint = if finished {
-        Line::from(vec![
-            Span::styled("[Enter/q]", Style::default().fg(Color::Green)),
-            Span::raw(" Back to terminal"),
-        ])
+        Line::from(Span::styled(
+            " Returning to terminal...",
+            Style::default().fg(Color::Green),
+        ))
     } else {
         Line::from(Span::styled(
             " Deleting — please wait...",
