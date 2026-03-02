@@ -3,4 +3,17 @@ name = "vacuum"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "vacuum"
+path = "src/main.rs"
+
 [dependencies]
+anyhow        = "1"
+bytesize      = "1"
+clap          = { version = "4", features = ["derive", "wrap_help"] }
+clap_complete = "4"
+dialoguer     = "0.12"
+ignore        = "0.4"
+indicatif     = "0.18"
+owo-colors    = { version = "4", features = ["supports-colors"] }
+walkdir       = "2"
