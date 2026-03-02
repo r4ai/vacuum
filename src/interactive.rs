@@ -3,11 +3,14 @@ use std::path::Path;
 
 use anyhow::Context as _;
 use bytesize::ByteSize;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEventKind,
+};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use crossterm::{execute, ExecutableCommand as _};
+use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -134,7 +137,8 @@ struct App<'a> {
     visual_anchor: usize,     // display-row index where visual mode started
     sort_col: SortColumn,
     sort_dir: SortDir,
-    page_size: usize, // updated each frame from rendered area
+    page_size: usize,   // updated each frame from rendered area
+    table_area: Rect,   // updated each frame; used for mouse hit-testing
     mode: Mode,
     filter_query: String,
     help_state: ListState,
@@ -164,6 +168,7 @@ impl<'a> App<'a> {
             sort_dir: SortDir::Asc,
             page_size: 10,
             visual_anchor: 0,
+            table_area: Rect::default(),
             mode: Mode::Normal,
             filter_query: String::new(),
             help_state,
@@ -519,7 +524,32 @@ fn render_header(frame: &mut ratatui::Frame, area: Rect) {
     frame.render_widget(text, area);
 }
 
+fn sort_column_at(col: u16, table_area: Rect) -> Option<SortColumn> {
+    // col is terminal column (absolute). Convert to offset inside table inner area.
+    let inner_x = col.saturating_sub(table_area.x + 1); // +1 for left border
+    let inner_w = table_area.width.saturating_sub(2);
+
+    // Compute column X ranges using the same constraints as render_table.
+    let rects = Layout::horizontal([
+        Constraint::Length(3),
+        Constraint::Length(12),
+        Constraint::Min(20),
+        Constraint::Length(10),
+        Constraint::Fill(1),
+    ])
+    .split(Rect { x: 0, y: 0, width: inner_w, height: 1 });
+
+    // col 0 = check mark (not sortable)
+    if inner_x < rects[1].x { return None; }
+    if inner_x < rects[2].x { return Some(SortColumn::Adapter); }
+    if inner_x < rects[3].x { return Some(SortColumn::Path); }
+    if inner_x < rects[4].x { return Some(SortColumn::Size); }
+    if inner_x < inner_w    { return Some(SortColumn::Description); }
+    None
+}
+
 fn render_table(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
+    app.table_area = area;
     let col_defs: &[(&str, SortColumn)] = &[
         ("Adapter", SortColumn::Adapter),
         ("Path", SortColumn::Path),
@@ -944,7 +974,8 @@ pub fn select_targets(targets: &[CleanTarget], root: &Path) -> anyhow::Result<Ve
 
     enable_raw_mode().context("Failed to enable raw mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).context("Failed to enter alternate screen")?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+        .context("Failed to enter alternate screen")?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("Failed to create terminal")?;
 
@@ -952,10 +983,12 @@ pub fn select_targets(targets: &[CleanTarget], root: &Path) -> anyhow::Result<Ve
     let result = run_loop(&mut terminal, &mut app);
 
     disable_raw_mode().context("Failed to disable raw mode")?;
-    terminal
-        .backend_mut()
-        .execute(LeaveAlternateScreen)
-        .context("Failed to leave alternate screen")?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )
+    .context("Failed to restore terminal")?;
     terminal.show_cursor().context("Failed to show cursor")?;
 
     result
@@ -968,24 +1001,35 @@ fn run_loop(
     loop {
         terminal.draw(|f| render(f, app))?;
 
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            let result = match app.mode {
-                Mode::Normal => handle_normal_key(app, key),
-                Mode::Visual => handle_visual_key(app, key),
-                Mode::Search => {
-                    handle_search_key(app, key);
-                    ActionResult::Continue
+        match event::read()? {
+            Event::Mouse(mouse) => {
+                if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                    && mouse.row == app.table_area.y + 1
+                    && app.mode != Mode::Search
+                    && !app.help_searching
+                {
+                    if let Some(col) = sort_column_at(mouse.column, app.table_area) {
+                        app.sort_by(col);
+                    }
                 }
-                Mode::Help => handle_help_key(app, key),
-            };
-            match result {
-                ActionResult::Continue => {}
-                ActionResult::Confirm => return Ok(app.chosen_targets()),
-                ActionResult::Quit => return Ok(vec![]),
             }
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                let result = match app.mode {
+                    Mode::Normal => handle_normal_key(app, key),
+                    Mode::Visual => handle_visual_key(app, key),
+                    Mode::Search => {
+                        handle_search_key(app, key);
+                        ActionResult::Continue
+                    }
+                    Mode::Help => handle_help_key(app, key),
+                };
+                match result {
+                    ActionResult::Continue => {}
+                    ActionResult::Confirm => return Ok(app.chosen_targets()),
+                    ActionResult::Quit => return Ok(vec![]),
+                }
+            }
+            _ => {}
         }
     }
 }
