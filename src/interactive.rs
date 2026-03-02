@@ -62,6 +62,7 @@ enum Mode {
     Visual, // Vim-like visual range selection
     Search,
     Help,
+    Detail, // Full-content popup for the selected row
 }
 
 #[derive(Clone, Copy)]
@@ -82,6 +83,7 @@ enum Action {
     SortBySize,
     SortByDescription,
     EnterVisual,
+    OpenDetail,
     OpenSearch,
     OpenHelp,
     Confirm,
@@ -115,6 +117,7 @@ static KEYBINDINGS: &[KeyBinding] = &[
     KeyBinding { key: "a",        desc: "Select all items",         action: Action::SelectAll },
     KeyBinding { key: "n",        desc: "Deselect all items",       action: Action::SelectNone },
     KeyBinding { key: "v",        desc: "Enter visual selection mode", action: Action::EnterVisual },
+    KeyBinding { key: "e",        desc: "Show full details of cursor row", action: Action::OpenDetail },
     KeyBinding { key: "1",        desc: "Sort by Adapter",          action: Action::SortByAdapter },
     KeyBinding { key: "2",        desc: "Sort by Path",             action: Action::SortByPath },
     KeyBinding { key: "3",        desc: "Sort by Size",             action: Action::SortBySize },
@@ -419,6 +422,11 @@ impl<'a> App<'a> {
             Action::SelectAll => self.select_all(),
             Action::SelectNone => self.select_none(),
             Action::EnterVisual => self.enter_visual(),
+            Action::OpenDetail => {
+                if !self.order.is_empty() {
+                    self.mode = Mode::Detail;
+                }
+            }
             Action::SortByAdapter => self.sort_by(SortColumn::Adapter),
             Action::SortByPath => self.sort_by(SortColumn::Path),
             Action::SortBySize => self.sort_by(SortColumn::Size),
@@ -535,6 +543,9 @@ fn render(frame: &mut ratatui::Frame, app: &mut App) {
 
     if app.mode == Mode::Help {
         render_help_overlay(frame, app, area);
+    }
+    if app.mode == Mode::Detail {
+        render_detail_popup(frame, app, area);
     }
 }
 
@@ -810,7 +821,56 @@ fn render_help_overlay(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(list, inner_chunks[0], &mut app.help_state);
 }
 
+fn render_detail_popup(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+    let popup = popup_area(area, 70, 50);
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(" Row Details  [any key] Close ")
+        .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let cur = app.cursor();
+    let Some(&orig_i) = app.order.get(cur) else { return };
+    let t = &app.targets[orig_i];
+    let rel = t.path.strip_prefix(app.root).unwrap_or(&t.path);
+
+    let fields: &[(&str, String)] = &[
+        ("Adapter",     t.adapter.to_string()),
+        ("Path",        rel.display().to_string()),
+        ("Size",        ByteSize(t.size).to_string()),
+        ("Description", t.description.clone()),
+    ];
+
+    let rows: Vec<Row> = fields
+        .iter()
+        .map(|(label, value)| {
+            Row::new(vec![
+                Cell::from(*label).style(
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+                Cell::from(value.clone()),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [Constraint::Length(13), Constraint::Min(10)],
+    );
+    frame.render_widget(table, inner);
+}
+
 // ─── Event handling ───────────────────────────────────────────────────────────
+
+fn handle_detail_key(app: &mut App, _key: KeyEvent) -> ActionResult {
+    app.mode = Mode::Normal;
+    ActionResult::Continue
+}
 
 fn handle_normal_key(app: &mut App, key: KeyEvent) -> ActionResult {
     match key.code {
@@ -838,6 +898,10 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> ActionResult {
         KeyCode::Char('3') => { app.sort_by(SortColumn::Size); ActionResult::Continue }
         KeyCode::Char('4') => { app.sort_by(SortColumn::Description); ActionResult::Continue }
         KeyCode::Char('v') => { app.enter_visual(); ActionResult::Continue }
+        KeyCode::Char('e') => {
+            if !app.order.is_empty() { app.mode = Mode::Detail; }
+            ActionResult::Continue
+        }
         KeyCode::Char('/') => { app.mode = Mode::Search; ActionResult::Continue }
         KeyCode::Char('?') => { app.mode = Mode::Help; ActionResult::Continue }
         _ => ActionResult::Continue,
@@ -1018,6 +1082,7 @@ fn run_loop(
                         ActionResult::Continue
                     }
                     Mode::Help => handle_help_key(app, key),
+                    Mode::Detail => handle_detail_key(app, key),
                 };
                 match result {
                     ActionResult::Continue => {}
