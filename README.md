@@ -77,6 +77,33 @@ vacuum --generate-completions bash > ~/.local/share/bash-completion/completions/
 
 ## 開発
 
+### セットアップ
+
+```sh
+git clone https://github.com/r4ai/vacuum
+cd vacuum
+cargo build
+```
+
+### コマンド
+
+```sh
+# デバッグビルドして実行
+cargo run -- [OPTIONS] [PATH]
+
+# リリースビルド
+cargo build --release
+
+# テスト実行
+cargo test
+
+# 静的解析（警告・エラーを確認）
+cargo clippy
+
+# フォーマット
+cargo fmt
+```
+
 ### アダプターの追加
 
 1. `src/adapters/` に新しいファイルを作成する
