@@ -630,9 +630,8 @@ fn render_table(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
             let rel = t.path.strip_prefix(app.root).unwrap_or(&t.path);
             let query = &app.filter_query;
             let row_style = if is_cursor && app.mode == Mode::Visual {
-                Style::default()
-                    .bg(Color::Blue)
-                    .add_modifier(Modifier::BOLD)
+                // REVERSED = swap terminal fg/bg (black-on-white on dark themes), like vim
+                Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
             } else if is_cursor {
                 Style::default()
                     .bg(Color::DarkGray)
@@ -721,7 +720,7 @@ fn render_hint(frame: &mut ratatui::Frame, app: &App, area: Rect) {
             Line::from(vec![
                 Span::styled(
                     " VISUAL",
-                    Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                    Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD),
                 ),
                 Span::raw("  "),
                 Span::styled("[↑↓/jk]", Style::default().fg(Color::Yellow)),
