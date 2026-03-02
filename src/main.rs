@@ -3,8 +3,8 @@ use clap::{CommandFactory as _, Parser as _};
 
 mod adapter;
 mod adapters;
-mod cli;
 mod cleaner;
+mod cli;
 mod display;
 mod interactive;
 mod scanner;
@@ -45,13 +45,17 @@ fn main() -> anyhow::Result<()> {
     for adapter in &adapters {
         eprintln!(
             "  [{tag}] {name}  — {desc}",
-            tag = if adapter.is_safe() { "safe" } else { "dangerous" },
+            tag = if adapter.is_safe() {
+                "safe"
+            } else {
+                "dangerous"
+            },
             name = adapter.name(),
             desc = adapter.description(),
         );
     }
     eprintln!();
-    let targets = scanner::scan(&root, &adapters)?;
+    let targets = scanner::scan_enabled(&root, &cli)?;
 
     // Display results
     display::print_targets(&targets, &root);
