@@ -49,12 +49,7 @@ impl DeletingState {
     pub fn drain(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                DeleteMsg::Progress {
-                    path,
-                    freed,
-                    done,
-                    total: _,
-                } => {
+                DeleteMsg::Progress { path, freed, done } => {
                     self.current_path = path;
                     self.freed = freed;
                     self.done = done;

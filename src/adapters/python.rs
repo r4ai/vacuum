@@ -22,14 +22,6 @@ impl Adapter for PythonAdapter {
         "python"
     }
 
-    fn description(&self) -> &str {
-        "Python build artifacts and virtual environments (__pycache__/, .venv/, dist/, etc.)"
-    }
-
-    fn is_safe(&self) -> bool {
-        true
-    }
-
     fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
         let mut targets = Vec::new();
         let mut iter = WalkDir::new(root).follow_links(false).into_iter();

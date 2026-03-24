@@ -107,10 +107,10 @@ fn run_loop(
 
         match event::read()? {
             Event::Mouse(mouse) => {
-                if let Phase::TargetSelection(app) = &mut phase {
-                    if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                        target_select::handle_mouse(app, mouse.column, mouse.row, mouse.kind);
-                    }
+                if let Phase::TargetSelection(app) = &mut phase
+                    && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                {
+                    target_select::handle_mouse(app, mouse.column, mouse.row, mouse.kind);
                 }
             }
 
@@ -166,15 +166,15 @@ fn run_loop(
 
                     // ── Deleting ──────────────────────────────────────────
                     Phase::Deleting(state) => {
-                        if state.finished {
-                            if matches!(
+                        if state.finished
+                            && matches!(
                                 key.code,
                                 KeyCode::Enter | KeyCode::Char('q') | KeyCode::Esc
-                            ) {
-                                let freed = state.freed;
-                                let errors = std::mem::take(&mut state.errors);
-                                return Ok(TuiResult::Completed { freed, errors });
-                            }
+                            )
+                        {
+                            let freed = state.freed;
+                            let errors = std::mem::take(&mut state.errors);
+                            return Ok(TuiResult::Completed { freed, errors });
                         }
                         // Ignore all keys while deletion is in progress
                     }

@@ -18,13 +18,6 @@ pub trait Adapter: Send + Sync {
     /// Short, lowercase identifier used in CLI flags (e.g. `"cargo"`).
     fn name(&self) -> &'static str;
 
-    /// One-line human description shown in `--help` output.
-    fn description(&self) -> &str;
-
-    /// Returns `true` for adapters that are enabled by default (safe).
-    /// Dangerous adapters return `false` (opt-in).
-    fn is_safe(&self) -> bool;
-
     /// Walk `root` recursively and return all discovered clean targets.
     fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>>;
 }

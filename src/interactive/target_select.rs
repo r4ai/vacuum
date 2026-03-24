@@ -831,10 +831,9 @@ pub fn handle_mouse(app: &mut App, col: u16, row: u16, kind: MouseEventKind) {
         && row == app.table_area.y + 1
         && app.mode != Mode::Search
         && !app.help_searching
+        && let Some(sc) = sort_column_at(col, app.table_area)
     {
-        if let Some(sc) = sort_column_at(col, app.table_area) {
-            app.sort_by(sc);
-        }
+        app.sort_by(sc);
     }
 }
 

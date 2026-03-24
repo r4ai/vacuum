@@ -10,14 +10,6 @@ impl Adapter for NodeAdapter {
         "node"
     }
 
-    fn description(&self) -> &str {
-        "Node.js/npm dependencies (node_modules/)"
-    }
-
-    fn is_safe(&self) -> bool {
-        true
-    }
-
     fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
         let mut targets = Vec::new();
         let mut iter = WalkDir::new(root).follow_links(false).into_iter();

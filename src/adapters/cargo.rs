@@ -10,14 +10,6 @@ impl Adapter for CargoAdapter {
         "cargo"
     }
 
-    fn description(&self) -> &str {
-        "Rust/Cargo build artifacts (target/)"
-    }
-
-    fn is_safe(&self) -> bool {
-        true
-    }
-
     fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
         let mut targets = Vec::new();
         let mut iter = WalkDir::new(root).follow_links(false).into_iter();
