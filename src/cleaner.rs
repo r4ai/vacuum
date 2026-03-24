@@ -43,9 +43,8 @@ pub fn delete_with_progress(
                     format!("Failed to remove directory: {}", target.path.display())
                 })
             } else {
-                fs::remove_file(&target.path).with_context(|| {
-                    format!("Failed to remove file: {}", target.path.display())
-                })
+                fs::remove_file(&target.path)
+                    .with_context(|| format!("Failed to remove file: {}", target.path.display()))
             };
 
             match result {

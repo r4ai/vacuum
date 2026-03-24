@@ -165,8 +165,7 @@ pub fn scan_streaming(
     cfg: &ScanConfig,
     on_found: &mut dyn FnMut(CleanTarget),
 ) -> anyhow::Result<()> {
-    let core_enabled =
-        cfg.node || cfg.cargo || cfg.python || cfg.go || cfg.gradle || cfg.maven;
+    let core_enabled = cfg.node || cfg.cargo || cfg.python || cfg.go || cfg.gradle || cfg.maven;
     if !core_enabled && !cfg.gitignore {
         return Ok(());
     }

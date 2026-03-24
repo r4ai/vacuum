@@ -90,7 +90,9 @@ fn render_scan_header(frame: &mut ratatui::Frame, area: Rect) {
     let header = ratatui::widgets::Paragraph::new(Line::from(vec![
         Span::styled(
             "vacuum",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" — Scanning..."),
     ]))
@@ -110,9 +112,13 @@ fn render_scan_body(frame: &mut ratatui::Frame, state: &ScanningState, area: Rec
     };
 
     let status_style = if state.done {
-        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     };
 
     let status_text = if state.done { "Done" } else { "Scanning" };
@@ -126,10 +132,7 @@ fn render_scan_body(frame: &mut ratatui::Frame, state: &ScanningState, area: Rec
 
     let lines = vec![
         Line::from(vec![
-            Span::styled(
-                format!("{spinner} {status_text}"),
-                status_style,
-            ),
+            Span::styled(format!("{spinner} {status_text}"), status_style),
             Span::styled(
                 format!("  {:.1}s", elapsed_s),
                 Style::default().fg(Color::DarkGray),
@@ -139,7 +142,9 @@ fn render_scan_body(frame: &mut ratatui::Frame, state: &ScanningState, area: Rec
             Span::raw("  Found: "),
             Span::styled(
                 format!("{}", state.found.len()),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" targets"),
         ]),

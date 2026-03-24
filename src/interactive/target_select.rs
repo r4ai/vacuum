@@ -244,7 +244,11 @@ impl App {
                 SortColumn::Size => ta.size.cmp(&tb.size),
                 SortColumn::Description => ta.description.cmp(&tb.description),
             };
-            if dir == SortDir::Desc { cmp.reverse() } else { cmp }
+            if dir == SortDir::Desc {
+                cmp.reverse()
+            } else {
+                cmp
+            }
         });
         self.apply_filter();
     }
@@ -482,7 +486,12 @@ fn sort_column_at(col: u16, table_area: Rect) -> Option<SortColumn> {
         Constraint::Length(10),
         Constraint::Fill(1),
     ])
-    .split(Rect { x: 0, y: 0, width: inner_w, height: 1 });
+    .split(Rect {
+        x: 0,
+        y: 0,
+        width: inner_w,
+        height: 1,
+    });
 
     if inner_x < rects[1].x {
         return None;
@@ -838,54 +847,138 @@ pub fn handle_normal_key(app: &mut App, key: KeyEvent) -> ActionResult {
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => ActionResult::Quit,
         KeyCode::Enter => ActionResult::Confirm,
-        KeyCode::Up | KeyCode::Char('k') => { app.move_up(); ActionResult::Continue }
-        KeyCode::Down | KeyCode::Char('j') => { app.move_down(); ActionResult::Continue }
-        KeyCode::PageUp => { app.move_page_up(); ActionResult::Continue }
-        KeyCode::PageDown => { app.move_page_down(); ActionResult::Continue }
-        KeyCode::Home | KeyCode::Char('g') => { app.move_top(); ActionResult::Continue }
-        KeyCode::End | KeyCode::Char('G') => { app.move_bottom(); ActionResult::Continue }
-        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.move_half_page_up(); ActionResult::Continue
-        }
-        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.move_half_page_down(); ActionResult::Continue
-        }
-        KeyCode::Char(' ') => { app.toggle(); ActionResult::Continue }
-        KeyCode::Char('a') => { app.select_all(); ActionResult::Continue }
-        KeyCode::Char('n') => { app.select_none(); ActionResult::Continue }
-        KeyCode::Char('1') => { app.sort_by(SortColumn::Adapter); ActionResult::Continue }
-        KeyCode::Char('2') => { app.sort_by(SortColumn::Path); ActionResult::Continue }
-        KeyCode::Char('3') => { app.sort_by(SortColumn::Size); ActionResult::Continue }
-        KeyCode::Char('4') => { app.sort_by(SortColumn::Description); ActionResult::Continue }
-        KeyCode::Char('v') => { app.enter_visual(); ActionResult::Continue }
-        KeyCode::Char('e') => {
-            if !app.order.is_empty() { app.mode = Mode::Detail; }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.move_up();
             ActionResult::Continue
         }
-        KeyCode::Char('/') => { app.mode = Mode::Search; ActionResult::Continue }
-        KeyCode::Char('?') => { app.mode = Mode::Help; ActionResult::Continue }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.move_down();
+            ActionResult::Continue
+        }
+        KeyCode::PageUp => {
+            app.move_page_up();
+            ActionResult::Continue
+        }
+        KeyCode::PageDown => {
+            app.move_page_down();
+            ActionResult::Continue
+        }
+        KeyCode::Home | KeyCode::Char('g') => {
+            app.move_top();
+            ActionResult::Continue
+        }
+        KeyCode::End | KeyCode::Char('G') => {
+            app.move_bottom();
+            ActionResult::Continue
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.move_half_page_up();
+            ActionResult::Continue
+        }
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.move_half_page_down();
+            ActionResult::Continue
+        }
+        KeyCode::Char(' ') => {
+            app.toggle();
+            ActionResult::Continue
+        }
+        KeyCode::Char('a') => {
+            app.select_all();
+            ActionResult::Continue
+        }
+        KeyCode::Char('n') => {
+            app.select_none();
+            ActionResult::Continue
+        }
+        KeyCode::Char('1') => {
+            app.sort_by(SortColumn::Adapter);
+            ActionResult::Continue
+        }
+        KeyCode::Char('2') => {
+            app.sort_by(SortColumn::Path);
+            ActionResult::Continue
+        }
+        KeyCode::Char('3') => {
+            app.sort_by(SortColumn::Size);
+            ActionResult::Continue
+        }
+        KeyCode::Char('4') => {
+            app.sort_by(SortColumn::Description);
+            ActionResult::Continue
+        }
+        KeyCode::Char('v') => {
+            app.enter_visual();
+            ActionResult::Continue
+        }
+        KeyCode::Char('e') => {
+            if !app.order.is_empty() {
+                app.mode = Mode::Detail;
+            }
+            ActionResult::Continue
+        }
+        KeyCode::Char('/') => {
+            app.mode = Mode::Search;
+            ActionResult::Continue
+        }
+        KeyCode::Char('?') => {
+            app.mode = Mode::Help;
+            ActionResult::Continue
+        }
         _ => ActionResult::Continue,
     }
 }
 
 pub fn handle_visual_key(app: &mut App, key: KeyEvent) -> ActionResult {
     match key.code {
-        KeyCode::Esc | KeyCode::Char('v') => { app.mode = Mode::Normal; ActionResult::Continue }
-        KeyCode::Up | KeyCode::Char('k') => { app.move_up(); ActionResult::Continue }
-        KeyCode::Down | KeyCode::Char('j') => { app.move_down(); ActionResult::Continue }
-        KeyCode::PageUp => { app.move_page_up(); ActionResult::Continue }
-        KeyCode::PageDown => { app.move_page_down(); ActionResult::Continue }
-        KeyCode::Home | KeyCode::Char('g') => { app.move_top(); ActionResult::Continue }
-        KeyCode::End | KeyCode::Char('G') => { app.move_bottom(); ActionResult::Continue }
+        KeyCode::Esc | KeyCode::Char('v') => {
+            app.mode = Mode::Normal;
+            ActionResult::Continue
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.move_up();
+            ActionResult::Continue
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.move_down();
+            ActionResult::Continue
+        }
+        KeyCode::PageUp => {
+            app.move_page_up();
+            ActionResult::Continue
+        }
+        KeyCode::PageDown => {
+            app.move_page_down();
+            ActionResult::Continue
+        }
+        KeyCode::Home | KeyCode::Char('g') => {
+            app.move_top();
+            ActionResult::Continue
+        }
+        KeyCode::End | KeyCode::Char('G') => {
+            app.move_bottom();
+            ActionResult::Continue
+        }
         KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.move_half_page_up(); ActionResult::Continue
+            app.move_half_page_up();
+            ActionResult::Continue
         }
         KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.move_half_page_down(); ActionResult::Continue
+            app.move_half_page_down();
+            ActionResult::Continue
         }
-        KeyCode::Char(' ') | KeyCode::Enter => { app.apply_visual_toggle(); ActionResult::Continue }
-        KeyCode::Char('a') => { app.apply_visual_op(true); ActionResult::Continue }
-        KeyCode::Char('n') => { app.apply_visual_op(false); ActionResult::Continue }
+        KeyCode::Char(' ') | KeyCode::Enter => {
+            app.apply_visual_toggle();
+            ActionResult::Continue
+        }
+        KeyCode::Char('a') => {
+            app.apply_visual_op(true);
+            ActionResult::Continue
+        }
+        KeyCode::Char('n') => {
+            app.apply_visual_op(false);
+            ActionResult::Continue
+        }
         _ => ActionResult::Continue,
     }
 }
@@ -897,9 +990,17 @@ pub fn handle_search_key(app: &mut App, key: KeyEvent) {
             app.apply_filter();
             app.mode = Mode::Normal;
         }
-        KeyCode::Enter => { app.mode = Mode::Normal; }
-        KeyCode::Backspace => { app.filter_query.pop(); app.apply_filter(); }
-        KeyCode::Char(c) => { app.filter_query.push(c); app.apply_filter(); }
+        KeyCode::Enter => {
+            app.mode = Mode::Normal;
+        }
+        KeyCode::Backspace => {
+            app.filter_query.pop();
+            app.apply_filter();
+        }
+        KeyCode::Char(c) => {
+            app.filter_query.push(c);
+            app.apply_filter();
+        }
         _ => {}
     }
 }
@@ -912,9 +1013,17 @@ pub fn handle_help_key(app: &mut App, key: KeyEvent) -> ActionResult {
                 app.apply_help_filter();
                 app.help_searching = false;
             }
-            KeyCode::Enter => { app.help_searching = false; }
-            KeyCode::Backspace => { app.help_filter.pop(); app.apply_help_filter(); }
-            KeyCode::Char(c) => { app.help_filter.push(c); app.apply_help_filter(); }
+            KeyCode::Enter => {
+                app.help_searching = false;
+            }
+            KeyCode::Backspace => {
+                app.help_filter.pop();
+                app.apply_help_filter();
+            }
+            KeyCode::Char(c) => {
+                app.help_filter.push(c);
+                app.apply_help_filter();
+            }
             _ => {}
         }
         return ActionResult::Continue;
@@ -928,9 +1037,18 @@ pub fn handle_help_key(app: &mut App, key: KeyEvent) -> ActionResult {
             app.mode = Mode::Normal;
             ActionResult::Continue
         }
-        KeyCode::Char('/') => { app.help_searching = true; ActionResult::Continue }
-        KeyCode::Up | KeyCode::Char('k') => { app.help_move_up(); ActionResult::Continue }
-        KeyCode::Down | KeyCode::Char('j') => { app.help_move_down(); ActionResult::Continue }
+        KeyCode::Char('/') => {
+            app.help_searching = true;
+            ActionResult::Continue
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.help_move_up();
+            ActionResult::Continue
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.help_move_down();
+            ActionResult::Continue
+        }
         KeyCode::Enter => {
             let display_idx = app.help_state.selected().unwrap_or(0);
             let kb_idx = app.help_order.get(display_idx).copied().unwrap_or(0);

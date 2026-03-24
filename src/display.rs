@@ -19,7 +19,9 @@ pub fn print_targets(targets: &[CleanTarget], root: &Path) {
     println!(
         "\n{} {} target(s) found  {}\n",
         "→".if_supports_color(Stream::Stdout, |t| t.cyan()),
-        targets.len().if_supports_color(Stream::Stdout, |t| t.yellow()),
+        targets
+            .len()
+            .if_supports_color(Stream::Stdout, |t| t.yellow()),
         format!("({})", ByteSize(total)).if_supports_color(Stream::Stdout, |t| t.bright_black()),
     );
 
@@ -29,7 +31,8 @@ pub fn print_targets(targets: &[CleanTarget], root: &Path) {
             "  {}  {}  {}",
             format!("[{}]", t.adapter).if_supports_color(Stream::Stdout, |s| s.cyan()),
             rel.display(),
-            format!("({})", ByteSize(t.size)).if_supports_color(Stream::Stdout, |s| s.bright_black()),
+            format!("({})", ByteSize(t.size))
+                .if_supports_color(Stream::Stdout, |s| s.bright_black()),
         );
     }
 
@@ -44,15 +47,12 @@ pub fn print_cancelled() {
 }
 
 /// Print the final report after TUI-based deletion completes (safe mode).
-pub fn print_final_report(
-    freed: u64,
-    errors: &[(String, String)],
-    dry_run: bool,
-) {
+pub fn print_final_report(freed: u64, errors: &[(String, String)], dry_run: bool) {
     if dry_run {
         println!(
             "{}",
-            "Dry run complete — nothing was deleted.".if_supports_color(Stream::Stdout, |t| t.yellow())
+            "Dry run complete — nothing was deleted."
+                .if_supports_color(Stream::Stdout, |t| t.yellow())
         );
         return;
     }
@@ -67,11 +67,12 @@ pub fn print_final_report(
         println!(
             "\n{} {} error(s) during deletion:",
             "⚠".if_supports_color(Stream::Stdout, |t| t.yellow()),
-            errors.len().if_supports_color(Stream::Stdout, |t| t.yellow()),
+            errors
+                .len()
+                .if_supports_color(Stream::Stdout, |t| t.yellow()),
         );
         for (path, err) in errors {
             println!("  {}: {}", path, err);
         }
     }
 }
-
