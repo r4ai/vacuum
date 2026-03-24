@@ -14,7 +14,6 @@ pub enum DeleteMsg {
         path: String,
         freed: u64,
         done: usize,
-        total: usize,
     },
     Done {
         freed: u64,
@@ -30,7 +29,6 @@ pub fn delete_with_progress(
     dry_run: bool,
     tx: std::sync::mpsc::Sender<DeleteMsg>,
 ) {
-    let total = targets.len();
     let mut freed: u64 = 0;
     let mut errors: Vec<(String, String)> = Vec::new();
 
@@ -43,9 +41,8 @@ pub fn delete_with_progress(
                     format!("Failed to remove directory: {}", target.path.display())
                 })
             } else {
-                fs::remove_file(&target.path).with_context(|| {
-                    format!("Failed to remove file: {}", target.path.display())
-                })
+                fs::remove_file(&target.path)
+                    .with_context(|| format!("Failed to remove file: {}", target.path.display()))
             };
 
             match result {
@@ -58,7 +55,6 @@ pub fn delete_with_progress(
             path: path_str,
             freed,
             done: i + 1,
-            total,
         });
     }
 

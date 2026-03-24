@@ -34,14 +34,12 @@ fn main() -> anyhow::Result<()> {
 
     match cli.mode {
         // ── Safe mode: full TUI workflow ──────────────────────────────────────
-        Mode::Safe => {
-            match interactive::run_tui_flow(&root, &cli)? {
-                TuiResult::Cancelled => display::print_cancelled(),
-                TuiResult::Completed { freed, errors } => {
-                    display::print_final_report(freed, &errors, cli.dry_run);
-                }
+        Mode::Safe => match interactive::run_tui_flow(&root, &cli)? {
+            TuiResult::Cancelled => display::print_cancelled(),
+            TuiResult::Completed { freed, errors } => {
+                display::print_final_report(freed, &errors, cli.dry_run);
             }
-        }
+        },
 
         // ── Auto mode: non-interactive scan + delete ─────────────────────────
         Mode::Auto => {
@@ -67,4 +65,3 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-

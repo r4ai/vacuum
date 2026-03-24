@@ -11,14 +11,6 @@ impl Adapter for GitignoreAdapter {
         "gitignore"
     }
 
-    fn description(&self) -> &str {
-        "Files and directories matched by .gitignore (dangerous)"
-    }
-
-    fn is_safe(&self) -> bool {
-        false
-    }
-
     fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
         let root_gitignore = root.join(".gitignore");
         if !root_gitignore.exists() {

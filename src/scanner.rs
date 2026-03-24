@@ -68,7 +68,8 @@ pub fn build_adapters(cli: &Cli) -> Vec<Box<dyn Adapter>> {
 }
 
 /// Run all enabled adapters, collect and deduplicate results.
-pub fn scan(root: &Path, adapters: &[Box<dyn Adapter>]) -> anyhow::Result<Vec<CleanTarget>> {
+#[cfg(test)]
+fn scan(root: &Path, adapters: &[Box<dyn Adapter>]) -> anyhow::Result<Vec<CleanTarget>> {
     let mut all: Vec<CleanTarget> = Vec::new();
     let mut seen_paths: HashSet<std::path::PathBuf> = HashSet::new();
 
@@ -165,8 +166,7 @@ pub fn scan_streaming(
     cfg: &ScanConfig,
     on_found: &mut dyn FnMut(CleanTarget),
 ) -> anyhow::Result<()> {
-    let core_enabled =
-        cfg.node || cfg.cargo || cfg.python || cfg.go || cfg.gradle || cfg.maven;
+    let core_enabled = cfg.node || cfg.cargo || cfg.python || cfg.go || cfg.gradle || cfg.maven;
     if !core_enabled && !cfg.gitignore {
         return Ok(());
     }
@@ -345,12 +345,6 @@ mod tests {
     impl Adapter for FixedAdapter {
         fn name(&self) -> &'static str {
             self.name
-        }
-        fn description(&self) -> &str {
-            "test adapter"
-        }
-        fn is_safe(&self) -> bool {
-            true
         }
         fn scan(&self, _root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
             Ok(self

@@ -21,8 +21,10 @@ mod scan_phase;
 mod target_select;
 pub mod types;
 
-use adapter_select::{AdapterSelectionResult, AdapterSelectionState, handle_adapter_selection_key,
-    render_adapter_selection};
+use adapter_select::{
+    AdapterSelectionResult, AdapterSelectionState, handle_adapter_selection_key,
+    render_adapter_selection,
+};
 use delete_phase::{DeletingState, render_deleting};
 use scan_phase::{ScanningState, render_scanning};
 use target_select::{
@@ -34,7 +36,10 @@ use types::{ActionResult, Mode};
 // ─── Public result type ───────────────────────────────────────────────────────
 
 pub enum TuiResult {
-    Completed { freed: u64, errors: Vec<(String, String)> },
+    Completed {
+        freed: u64,
+        errors: Vec<(String, String)>,
+    },
     Cancelled,
 }
 
@@ -73,7 +78,10 @@ fn run_loop(
                 if s.done {
                     let targets = std::mem::take(&mut s.found);
                     if targets.is_empty() {
-                        return Ok(TuiResult::Completed { freed: 0, errors: vec![] });
+                        return Ok(TuiResult::Completed {
+                            freed: 0,
+                            errors: vec![],
+                        });
                     }
                     phase = Phase::TargetSelection(App::new(targets, root.to_path_buf()));
                     continue;
@@ -99,10 +107,10 @@ fn run_loop(
 
         match event::read()? {
             Event::Mouse(mouse) => {
-                if let Phase::TargetSelection(app) = &mut phase {
-                    if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-                        target_select::handle_mouse(app, mouse.column, mouse.row, mouse.kind);
-                    }
+                if let Phase::TargetSelection(app) = &mut phase
+                    && mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                {
+                    target_select::handle_mouse(app, mouse.column, mouse.row, mouse.kind);
                 }
             }
 
@@ -114,10 +122,8 @@ fn run_loop(
                             AdapterSelectionResult::Quit => return Ok(TuiResult::Cancelled),
                             AdapterSelectionResult::Confirm => {
                                 let cfg = state.cfg.clone();
-                                phase = Phase::Scanning(ScanningState::new(
-                                    root.to_path_buf(),
-                                    cfg,
-                                ));
+                                phase =
+                                    Phase::Scanning(ScanningState::new(root.to_path_buf(), cfg));
                             }
                             AdapterSelectionResult::Continue => {}
                         }
@@ -147,7 +153,10 @@ fn run_loop(
                             ActionResult::Confirm => {
                                 let chosen = app.chosen_targets();
                                 if chosen.is_empty() {
-                                    return Ok(TuiResult::Completed { freed: 0, errors: vec![] });
+                                    return Ok(TuiResult::Completed {
+                                        freed: 0,
+                                        errors: vec![],
+                                    });
                                 }
                                 phase = Phase::Deleting(DeletingState::new(chosen, cli.dry_run));
                             }
@@ -157,15 +166,15 @@ fn run_loop(
 
                     // ── Deleting ──────────────────────────────────────────
                     Phase::Deleting(state) => {
-                        if state.finished {
-                            if matches!(
+                        if state.finished
+                            && matches!(
                                 key.code,
                                 KeyCode::Enter | KeyCode::Char('q') | KeyCode::Esc
-                            ) {
-                                let freed = state.freed;
-                                let errors = std::mem::take(&mut state.errors);
-                                return Ok(TuiResult::Completed { freed, errors });
-                            }
+                            )
+                        {
+                            let freed = state.freed;
+                            let errors = std::mem::take(&mut state.errors);
+                            return Ok(TuiResult::Completed { freed, errors });
                         }
                         // Ignore all keys while deletion is in progress
                     }

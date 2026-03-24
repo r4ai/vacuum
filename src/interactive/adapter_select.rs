@@ -96,7 +96,11 @@ impl AdapterSelectionState {
         }
         let mut list_state = ListState::default();
         list_state.select(Some(0));
-        Self { cfg, cursor: 0, list_state }
+        Self {
+            cfg,
+            cursor: 0,
+            list_state,
+        }
     }
 
     pub fn any_selected(&self) -> bool {
@@ -105,13 +109,21 @@ impl AdapterSelectionState {
 
     fn move_up(&mut self) {
         let len = ALL_ADAPTERS.len();
-        self.cursor = if self.cursor == 0 { len - 1 } else { self.cursor - 1 };
+        self.cursor = if self.cursor == 0 {
+            len - 1
+        } else {
+            self.cursor - 1
+        };
         self.list_state.select(Some(self.cursor));
     }
 
     fn move_down(&mut self) {
         let len = ALL_ADAPTERS.len();
-        self.cursor = if self.cursor + 1 >= len { 0 } else { self.cursor + 1 };
+        self.cursor = if self.cursor + 1 >= len {
+            0
+        } else {
+            self.cursor + 1
+        };
         self.list_state.select(Some(self.cursor));
     }
 
@@ -144,7 +156,9 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
             "vacuum",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" — Select adapters to scan"),
     ]))
@@ -179,10 +193,7 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
                     format!("{:<10}", entry.name),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(
-                    entry.description,
-                    Style::default().fg(Color::Gray),
-                ),
+                Span::styled(entry.description, Style::default().fg(Color::Gray)),
                 safe_badge,
             ]))
         })
@@ -210,7 +221,11 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
         t(" Toggle  "),
         Span::styled(
             "[Enter]",
-            Style::default().fg(if state.any_selected() { Color::Green } else { Color::DarkGray }),
+            Style::default().fg(if state.any_selected() {
+                Color::Green
+            } else {
+                Color::DarkGray
+            }),
         ),
         t(" Scan  "),
         Span::styled("[q/Esc]", Style::default().fg(Color::Red)),
@@ -240,9 +255,18 @@ pub fn handle_adapter_selection_key(
                 AdapterSelectionResult::Continue
             }
         }
-        KeyCode::Up | KeyCode::Char('k') => { state.move_up(); AdapterSelectionResult::Continue }
-        KeyCode::Down | KeyCode::Char('j') => { state.move_down(); AdapterSelectionResult::Continue }
-        KeyCode::Char(' ') => { state.toggle(); AdapterSelectionResult::Continue }
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.move_up();
+            AdapterSelectionResult::Continue
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.move_down();
+            AdapterSelectionResult::Continue
+        }
+        KeyCode::Char(' ') => {
+            state.toggle();
+            AdapterSelectionResult::Continue
+        }
         _ => AdapterSelectionResult::Continue,
     }
 }

@@ -49,12 +49,7 @@ impl DeletingState {
     pub fn drain(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                DeleteMsg::Progress {
-                    path,
-                    freed,
-                    done,
-                    total: _,
-                } => {
+                DeleteMsg::Progress { path, freed, done } => {
                     self.current_path = path;
                     self.freed = freed;
                     self.done = done;
@@ -96,7 +91,9 @@ fn render_delete_header(frame: &mut ratatui::Frame, area: Rect, dry_run: bool) {
     let header = Paragraph::new(Line::from(vec![
         Span::styled(
             "vacuum",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(" — {label}")),
     ]))
@@ -146,11 +143,17 @@ fn render_delete_body(frame: &mut ratatui::Frame, state: &DeletingState, area: R
     let elapsed = state.start.elapsed().as_secs_f64();
     let freed_str = ByteSize(state.freed).to_string();
     let stats_line = if state.finished {
-        let status = if state.dry_run { "Dry run complete" } else { "Done" };
+        let status = if state.dry_run {
+            "Dry run complete"
+        } else {
+            "Done"
+        };
         Line::from(vec![
             Span::styled(
                 format!("✓ {status}"),
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!("  freed: {freed_str}")),
             if state.errors.is_empty() {

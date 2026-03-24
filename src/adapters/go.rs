@@ -10,14 +10,6 @@ impl Adapter for GoAdapter {
         "go"
     }
 
-    fn description(&self) -> &str {
-        "Go vendor directory (vendor/)"
-    }
-
-    fn is_safe(&self) -> bool {
-        true
-    }
-
     fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
         let mut targets = Vec::new();
         let mut iter = WalkDir::new(root).follow_links(false).into_iter();

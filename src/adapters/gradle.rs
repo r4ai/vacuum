@@ -16,14 +16,6 @@ impl Adapter for GradleAdapter {
         "gradle"
     }
 
-    fn description(&self) -> &str {
-        "Gradle build artifacts (.gradle/, build/)"
-    }
-
-    fn is_safe(&self) -> bool {
-        true
-    }
-
     fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
         let mut targets = Vec::new();
         let mut iter = WalkDir::new(root).follow_links(false).into_iter();
