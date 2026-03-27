@@ -1,6 +1,8 @@
 # vacuum
 
-ビルド成果物や依存関係キャッシュを再帰的に削除する CLI ツール。
+ビルド成果物や依存関係キャッシュを再帰的に削除する CLI ツール
+
+https://github.com/user-attachments/assets/1f263a29-222e-4bf8-9101-e04cb53ac56c
 
 ## インストール
 
