@@ -60,6 +60,13 @@ static ALL_ADAPTERS: &[AdapterEntry] = &[
         set: |c, v| c.maven = v,
     },
     AdapterEntry {
+        name: "ocaml",
+        description: "_build/",
+        is_safe: true,
+        get: |c| c.ocaml,
+        set: |c, v| c.ocaml = v,
+    },
+    AdapterEntry {
         name: "gitignore",
         description: ".gitignore-matched paths",
         is_safe: false,
@@ -87,6 +94,7 @@ impl AdapterSelectionState {
             go: false,
             gradle: false,
             maven: false,
+            ocaml: false,
             gitignore: false,
         };
         for entry in ALL_ADAPTERS {

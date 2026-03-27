@@ -5,7 +5,7 @@ use walkdir::WalkDir;
 use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
 use crate::adapters::{
     CargoAdapter, GitignoreAdapter, GoAdapter, GradleAdapter, MavenAdapter, NodeAdapter,
-    PythonAdapter,
+    OcamlAdapter, PythonAdapter,
 };
 use crate::cli::Cli;
 
@@ -20,6 +20,7 @@ pub struct ScanConfig {
     pub go: bool,
     pub gradle: bool,
     pub maven: bool,
+    pub ocaml: bool,
     pub gitignore: bool,
 }
 
@@ -33,6 +34,7 @@ impl From<&Cli> for ScanConfig {
             go: cli.go,
             gradle: cli.gradle,
             maven: cli.maven,
+            ocaml: cli.ocaml,
             gitignore: cli.gitignore,
         }
     }
@@ -59,6 +61,9 @@ pub fn build_adapters(cli: &Cli) -> Vec<Box<dyn Adapter>> {
     }
     if cli.maven {
         adapters.push(Box::new(MavenAdapter));
+    }
+    if cli.ocaml {
+        adapters.push(Box::new(OcamlAdapter));
     }
     if cli.gitignore {
         adapters.push(Box::new(GitignoreAdapter));
@@ -166,7 +171,7 @@ pub fn scan_streaming(
     cfg: &ScanConfig,
     on_found: &mut dyn FnMut(CleanTarget),
 ) -> anyhow::Result<()> {
-    let core_enabled = cfg.node || cfg.cargo || cfg.python || cfg.go || cfg.gradle || cfg.maven;
+    let core_enabled = cfg.node || cfg.cargo || cfg.python || cfg.go || cfg.gradle || cfg.maven || cfg.ocaml;
     if !core_enabled && !cfg.gitignore {
         return Ok(());
     }
@@ -196,6 +201,7 @@ pub fn scan_streaming(
     let mut gradle_context_cache: HashMap<PathBuf, bool> = HashMap::new();
     let mut python_context_cache: HashMap<PathBuf, bool> = HashMap::new();
     let mut python_source_cache: HashMap<PathBuf, bool> = HashMap::new();
+    let mut ocaml_context_cache: HashMap<PathBuf, bool> = HashMap::new();
 
     while let Some(entry) = iter.next() {
         let entry = match entry {
@@ -268,6 +274,13 @@ pub fn scan_streaming(
                 && has_file_cached(&mut maven_context_cache, parent, "pom.xml")
             {
                 matched = Some(("maven", "Maven build artifacts (target/)".into()));
+            }
+            if matched.is_none()
+                && cfg.ocaml
+                && name == "_build"
+                && has_file_cached(&mut ocaml_context_cache, parent, "dune-project")
+            {
+                matched = Some(("ocaml", "OCaml/dune build artifacts (_build/)".into()));
             }
 
             if let Some((adapter, description)) = matched {
@@ -436,6 +449,7 @@ mod tests {
             go: true,
             gradle: true,
             maven: true,
+            ocaml: true,
             gitignore: false,
         }
     }
