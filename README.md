@@ -1,6 +1,8 @@
 # vacuum
 
-ビルド成果物や依存関係キャッシュを再帰的に削除する CLI ツール。
+ビルド成果物や依存関係キャッシュを再帰的に削除する CLI ツール
+
+https://github.com/user-attachments/assets/1f263a29-222e-4bf8-9101-e04cb53ac56c
 
 ## インストール
 
@@ -119,6 +121,7 @@ cargo fmt
 3. `src/adapters/mod.rs` に追加する
 4. `src/cli.rs` にフラグを追加する
 5. `src/scanner.rs` の `build_adapters` に組み込む
+6. `README.md` のアダプター一覧表を更新する
 
 ```rust
 // src/adapters/my_adapter.rs
