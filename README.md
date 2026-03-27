@@ -119,6 +119,7 @@ cargo fmt
 3. `src/adapters/mod.rs` に追加する
 4. `src/cli.rs` にフラグを追加する
 5. `src/scanner.rs` の `build_adapters` に組み込む
+6. `README.md` のアダプター一覧表を更新する
 
 ```rust
 // src/adapters/my_adapter.rs
