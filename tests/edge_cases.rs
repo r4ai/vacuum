@@ -66,7 +66,10 @@ fn file_path_instead_of_dir_exits_with_error() {
     let file = dir.path().join("file.txt");
     common::make_file(&file, b"content");
 
-    let status = Command::new(common::vacuum_bin()).arg(&file).status().unwrap();
+    let status = Command::new(common::vacuum_bin())
+        .arg(&file)
+        .status()
+        .unwrap();
 
     assert!(
         !status.success(),
