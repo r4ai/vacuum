@@ -13,6 +13,20 @@ t-wadaのTDDで実装する。
 - 論理が明快
 - 意味を一意に解釈できる（読み違いが発生しない）
 
+## コミット
+
+コミットメッセージと PR タイトルは [Conventional Commits](https://www.conventionalcommits.org/) に従う。
+
+## CI
+
+実装が終わったら、`.github/workflows/ci.yml` で定義されている CI を手元で実行し、通ることを必ず確認する。
+
+```sh
+cargo fmt --check
+cargo clippy --locked -- -D warnings
+cargo test --locked
+```
+
 ## テスト
 
 **古典派テスト（振る舞いの検証）** を採用する。
