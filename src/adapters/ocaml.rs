@@ -6,7 +6,15 @@ use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
 pub struct OcamlAdapter;
 
 fn has_ocaml_context(dir: &Path) -> bool {
-    dir.join("dune-project").exists()
+    if dir.join("dune-project").exists() || dir.join("dune-workspace").exists() {
+        return true;
+    }
+
+    dir.read_dir().is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| entry.path().extension().is_some_and(|ext| ext == "opam"))
+    })
 }
 
 impl Adapter for OcamlAdapter {
@@ -30,7 +38,7 @@ impl Adapter for OcamlAdapter {
             }
 
             let name = entry.file_name().to_string_lossy();
-            if name != "_build" {
+            if name != "_build" && name != "_opam" {
                 continue;
             }
 
@@ -46,7 +54,7 @@ impl Adapter for OcamlAdapter {
             targets.push(CleanTarget {
                 path: path.to_path_buf(),
                 adapter: self.name(),
-                description: "OCaml/dune build artifacts (_build/)".into(),
+                description: format!("OCaml build artifact ({name}/)"),
                 size,
             });
             iter.skip_current_dir();
@@ -108,5 +116,36 @@ mod tests {
         let targets = OcamlAdapter.scan(dir.path()).unwrap();
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].path, dir.path().join("_build"));
+    }
+
+    #[test]
+    fn opam_dir_with_dune_workspace_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("dune-workspace"), "(lang dune 3.0)").unwrap();
+        fs::create_dir(dir.path().join("_opam")).unwrap();
+
+        let targets = OcamlAdapter.scan(dir.path()).unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].path, dir.path().join("_opam"));
+    }
+
+    #[test]
+    fn opam_dir_with_opam_file_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("sample.opam"), "opam-version: \"2.0\"").unwrap();
+        fs::create_dir(dir.path().join("_opam")).unwrap();
+
+        let targets = OcamlAdapter.scan(dir.path()).unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].path, dir.path().join("_opam"));
+    }
+
+    #[test]
+    fn opam_dir_without_context_not_detected() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir(dir.path().join("_opam")).unwrap();
+
+        let targets = OcamlAdapter.scan(dir.path()).unwrap();
+        assert!(targets.is_empty());
     }
 }

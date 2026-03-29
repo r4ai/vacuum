@@ -41,7 +41,10 @@ fn build_dir_without_dune_project_not_deleted() {
         .unwrap();
 
     assert!(status.success());
-    assert!(root.join("_build").exists(), "_build/ should NOT be deleted");
+    assert!(
+        root.join("_build").exists(),
+        "_build/ should NOT be deleted"
+    );
 }
 
 #[test]
@@ -62,4 +65,38 @@ fn ocaml_flag_false_skips_build_dir() {
         root.join("_build").exists(),
         "_build/ should NOT be deleted when --ocaml=false"
     );
+}
+
+#[test]
+fn auto_mode_deletes_opam_switch_dir() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::make_file(&root.join("dune-project"), b"(lang dune 3.0)");
+    common::make_dir(&root.join("_opam").join("lib"));
+    common::make_file(&root.join("_opam").join("lib").join("x"), b"1");
+
+    let status = Command::new(common::vacuum_bin())
+        .arg(root)
+        .args(["--mode", "auto"])
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert!(!root.join("_opam").exists(), "_opam/ should be deleted");
+}
+
+#[test]
+fn opam_switch_dir_without_ocaml_context_not_deleted() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::make_dir(&root.join("_opam"));
+
+    let status = Command::new(common::vacuum_bin())
+        .arg(root)
+        .args(["--mode", "auto"])
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert!(root.join("_opam").exists(), "_opam/ should NOT be deleted");
 }

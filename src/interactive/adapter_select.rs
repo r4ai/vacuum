@@ -61,7 +61,7 @@ static ALL_ADAPTERS: &[AdapterEntry] = &[
     },
     AdapterEntry {
         name: "ocaml",
-        description: "_build/",
+        description: "_build/, _opam/",
         is_safe: true,
         get: |c| c.ocaml,
         set: |c, v| c.ocaml = v,

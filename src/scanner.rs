@@ -115,6 +115,18 @@ fn has_gradle_context(dir: &Path) -> bool {
     dir.join("build.gradle").exists() || dir.join("build.gradle.kts").exists()
 }
 
+fn has_ocaml_context(dir: &Path) -> bool {
+    if dir.join("dune-project").exists() || dir.join("dune-workspace").exists() {
+        return true;
+    }
+
+    dir.read_dir().is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| entry.path().extension().is_some_and(|ext| ext == "opam"))
+    })
+}
+
 fn has_python_context_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path) -> bool {
     if let Some(has_context) = cache.get(dir) {
         return *has_context;
@@ -129,6 +141,15 @@ fn has_gradle_context_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path) -> 
         return *has_context;
     }
     let has_context = has_gradle_context(dir);
+    cache.insert(dir.to_path_buf(), has_context);
+    has_context
+}
+
+fn has_ocaml_context_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path) -> bool {
+    if let Some(has_context) = cache.get(dir) {
+        return *has_context;
+    }
+    let has_context = has_ocaml_context(dir);
     cache.insert(dir.to_path_buf(), has_context);
     has_context
 }
@@ -171,7 +192,8 @@ pub fn scan_streaming(
     cfg: &ScanConfig,
     on_found: &mut dyn FnMut(CleanTarget),
 ) -> anyhow::Result<()> {
-    let core_enabled = cfg.node || cfg.cargo || cfg.python || cfg.go || cfg.gradle || cfg.maven || cfg.ocaml;
+    let core_enabled =
+        cfg.node || cfg.cargo || cfg.python || cfg.go || cfg.gradle || cfg.maven || cfg.ocaml;
     if !core_enabled && !cfg.gitignore {
         return Ok(());
     }
@@ -277,10 +299,10 @@ pub fn scan_streaming(
             }
             if matched.is_none()
                 && cfg.ocaml
-                && name == "_build"
-                && has_file_cached(&mut ocaml_context_cache, parent, "dune-project")
+                && (name == "_build" || name == "_opam")
+                && has_ocaml_context_cached(&mut ocaml_context_cache, parent)
             {
-                matched = Some(("ocaml", "OCaml/dune build artifacts (_build/)".into()));
+                matched = Some(("ocaml", format!("OCaml build artifact ({name}/)")));
             }
 
             if let Some((adapter, description)) = matched {

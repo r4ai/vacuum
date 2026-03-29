@@ -103,7 +103,7 @@ pub struct Cli {
     )]
     pub maven: bool,
 
-    /// OCaml/dune adapter — removes _build/ [default: on]
+    /// OCaml/dune adapter — removes _build/, _opam/ [default: on]
     #[arg(
         long,
         default_value_t = true,
