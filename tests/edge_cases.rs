@@ -34,6 +34,7 @@ fn all_adapters_disabled_exits_cleanly() {
             "--go=false",
             "--gradle=false",
             "--maven=false",
+            "--ocaml=false",
         ])
         .output()
         .unwrap();

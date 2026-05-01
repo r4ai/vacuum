@@ -103,6 +103,17 @@ pub struct Cli {
     )]
     pub maven: bool,
 
+    /// OCaml/dune adapter — removes _build/, _opam/ [default: on]
+    #[arg(
+        long,
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        value_name = "BOOL",
+        help_heading = "Adapters"
+    )]
+    pub ocaml: bool,
+
     // ---- Dangerous adapters (default: off) -----------------------------------
     /// Gitignore adapter — removes all files matched by .gitignore (dangerous) [default: off]
     #[arg(
