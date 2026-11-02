@@ -13,9 +13,56 @@ pub struct Excludes {
     root: PathBuf,
     /// Patterns relative to the scan root.
     matcher: Gitignore,
-    /// `~/...` patterns, matched against paths relative to the home
-    /// directory. They also cover a scan root inside an excluded path.
-    home: Option<(PathBuf, Gitignore)>,
+    /// `~/...` patterns, anchored at the real directory they name. They
+    /// also cover a scan root inside an excluded path.
+    anchored: Vec<Anchored>,
+}
+
+/// A `~/...` pattern split into the real directory of its literal prefix
+/// and the rest of the pattern.
+///
+/// The prefix is canonicalized like the scan roots, so `~/work/...` still
+/// matches when `~/work` is a symlink to `/mnt/work`.
+struct Anchored {
+    base: PathBuf,
+    /// The rest of the pattern, relative to `base`; `None` excludes `base`
+    /// itself and everything below it.
+    rest: Option<Gitignore>,
+}
+
+impl Anchored {
+    fn new(home: &Path, pattern: &str) -> anyhow::Result<Self> {
+        let is_glob = |part: &str| part.contains(['*', '?', '[', '{', '\\', '!']);
+        let parts: Vec<&str> = pattern.split('/').filter(|p| !p.is_empty()).collect();
+        let literal = parts.iter().take_while(|p| !is_glob(p)).count();
+        let lexical = parts[..literal]
+            .iter()
+            .fold(home.to_path_buf(), |dir, part| dir.join(part));
+        let base = lexical.canonicalize().unwrap_or(lexical);
+        let rest = if literal == parts.len() {
+            None
+        } else {
+            let mut builder = GitignoreBuilder::new(&base);
+            builder.add_line(None, &format!("/{}", parts[literal..].join("/")))?;
+            Some(builder.build()?)
+        };
+        Ok(Self { base, rest })
+    }
+
+    fn matches(&self, path: &Path, is_dir: bool) -> bool {
+        let Ok(relative) = path.strip_prefix(&self.base) else {
+            return false;
+        };
+        match &self.rest {
+            None => true,
+            Some(rest) => {
+                !relative.as_os_str().is_empty()
+                    && rest
+                        .matched_path_or_any_parents(relative, is_dir)
+                        .is_ignore()
+            }
+        }
+    }
 }
 
 impl Excludes {
@@ -29,28 +76,25 @@ impl Excludes {
         {
             return Err(e).with_context(|| format!("Invalid {}", file.display()));
         }
-        let home_dir = home_dir();
-        let mut home_builder = home_dir.as_deref().map(GitignoreBuilder::new);
+        let home = home_dir();
+        let mut anchored = Vec::new();
         for pattern in patterns {
-            let (target, line) = match (pattern.strip_prefix("~/"), home_builder.as_mut()) {
-                // Anchor it at the home directory.
-                (Some(rest), Some(home)) => (home, format!("/{rest}")),
+            let invalid = || format!("Invalid --exclude pattern: {pattern}");
+            match (pattern.strip_prefix("~/"), &home) {
+                (Some(rest), Some(home)) => {
+                    anchored.push(Anchored::new(home, rest).with_context(invalid)?)
+                }
                 // Without a home directory, it cannot match anything.
-                (Some(_), None) => continue,
-                (None, _) => (&mut builder, pattern.clone()),
-            };
-            target
-                .add_line(None, &line)
-                .with_context(|| format!("Invalid --exclude pattern: {pattern}"))?;
+                (Some(_), None) => {}
+                (None, _) => {
+                    builder.add_line(None, pattern).with_context(invalid)?;
+                }
+            }
         }
-        let home = match (home_dir, home_builder) {
-            (Some(dir), Some(builder)) => Some((dir, builder.build()?)),
-            _ => None,
-        };
         Ok(Self {
             root: root.to_path_buf(),
             matcher: builder.build()?,
-            home,
+            anchored,
         })
     }
 
@@ -60,7 +104,7 @@ impl Excludes {
         Self {
             root: PathBuf::new(),
             matcher: Gitignore::empty(),
-            home: None,
+            anchored: Vec::new(),
         }
     }
 
@@ -74,23 +118,11 @@ impl Excludes {
                 .is_ignore(),
             _ => false,
         };
-        by_root
-            || self.home.as_ref().is_some_and(|(home, matcher)| {
-                path.strip_prefix(home).is_ok_and(|relative| {
-                    !relative.as_os_str().is_empty()
-                        && matcher
-                            .matched_path_or_any_parents(relative, is_dir)
-                            .is_ignore()
-                })
-            })
+        by_root || self.anchored.iter().any(|a| a.matches(path, is_dir))
     }
 
     fn has_patterns(&self) -> bool {
-        self.matcher.num_ignores() > 0
-            || self
-                .home
-                .as_ref()
-                .is_some_and(|(_, matcher)| matcher.num_ignores() > 0)
+        self.matcher.num_ignores() > 0 || !self.anchored.is_empty()
     }
 
     /// Whether any path strictly inside `dir` is excluded. Deleting `dir`
