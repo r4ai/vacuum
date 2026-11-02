@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 
 use crate::adapter::CleanTarget;
-use crate::cleaner::{DeleteMsg, delete_with_progress};
+use crate::cleaner::{DeleteMethod, DeleteMsg, delete_with_progress};
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -26,11 +26,11 @@ pub struct DeletingState {
 
 impl DeletingState {
     /// Spawn background delete thread and return the state.
-    pub fn new(targets: Vec<CleanTarget>, dry_run: bool) -> Self {
+    pub fn new(targets: Vec<CleanTarget>, dry_run: bool, method: DeleteMethod) -> Self {
         let total = targets.len();
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            delete_with_progress(targets, dry_run, tx);
+            delete_with_progress(targets, dry_run, method, tx);
         });
         Self {
             rx,

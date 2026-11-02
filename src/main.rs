@@ -74,7 +74,7 @@ fn run() -> anyhow::Result<()> {
             }
 
             let dry_run = cli.dry_run;
-            cleaner::delete_targets(&targets, dry_run)?;
+            cleaner::delete_targets(&targets, dry_run, cli.delete_method())?;
         }
     }
 

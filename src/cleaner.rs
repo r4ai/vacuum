@@ -5,6 +5,30 @@ use std::fs;
 
 use crate::adapter::CleanTarget;
 
+// ─── Removal ──────────────────────────────────────────────────────────────────
+
+/// How targets are removed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeleteMethod {
+    /// Delete permanently.
+    Remove,
+    /// Move to the OS trash, so the target can be restored.
+    Trash,
+}
+
+/// Remove one target with `method`.
+fn remove(target: &CleanTarget, method: DeleteMethod) -> anyhow::Result<()> {
+    let path = &target.path;
+    match method {
+        DeleteMethod::Trash => trash::delete(path)
+            .with_context(|| format!("Failed to move to trash: {}", path.display())),
+        DeleteMethod::Remove if path.is_dir() => fs::remove_dir_all(path)
+            .with_context(|| format!("Failed to remove directory: {}", path.display())),
+        DeleteMethod::Remove => fs::remove_file(path)
+            .with_context(|| format!("Failed to remove file: {}", path.display())),
+    }
+}
+
 // ─── TUI-compatible deletion (background thread) ─────────────────────────────
 
 /// Progress event sent from `delete_with_progress` to the TUI thread.
@@ -27,6 +51,7 @@ pub enum DeleteMsg {
 pub fn delete_with_progress(
     targets: Vec<CleanTarget>,
     dry_run: bool,
+    method: DeleteMethod,
     tx: std::sync::mpsc::Sender<DeleteMsg>,
 ) {
     let mut freed: u64 = 0;
@@ -36,14 +61,7 @@ pub fn delete_with_progress(
         let path_str = target.path.display().to_string();
 
         if !dry_run {
-            let result = if target.path.is_dir() {
-                fs::remove_dir_all(&target.path).with_context(|| {
-                    format!("Failed to remove directory: {}", target.path.display())
-                })
-            } else {
-                fs::remove_file(&target.path)
-                    .with_context(|| format!("Failed to remove file: {}", target.path.display()))
-            };
+            let result = remove(target, method);
 
             match result {
                 Ok(()) => freed += target.size,
@@ -65,7 +83,11 @@ pub fn delete_with_progress(
 
 /// Delete the given targets, showing a progress bar.
 /// In dry-run mode, only prints what would be deleted.
-pub fn delete_targets(targets: &[CleanTarget], dry_run: bool) -> anyhow::Result<()> {
+pub fn delete_targets(
+    targets: &[CleanTarget],
+    dry_run: bool,
+    method: DeleteMethod,
+) -> anyhow::Result<()> {
     if targets.is_empty() {
         println!("Nothing to delete.");
         return Ok(());
@@ -98,13 +120,7 @@ pub fn delete_targets(targets: &[CleanTarget], dry_run: bool) -> anyhow::Result<
     for target in targets {
         pb.set_message(format!("{}", target.path.display()));
 
-        let result = if target.path.is_dir() {
-            fs::remove_dir_all(&target.path)
-                .with_context(|| format!("Failed to remove directory: {}", target.path.display()))
-        } else {
-            fs::remove_file(&target.path)
-                .with_context(|| format!("Failed to remove file: {}", target.path.display()))
-        };
+        let result = remove(target, method);
 
         match result {
             Ok(()) => freed += target.size,
@@ -141,7 +157,7 @@ mod tests {
             description: "test".into(),
             size: 0,
         };
-        assert!(delete_targets(&[missing], false).is_err());
+        assert!(delete_targets(&[missing], false, DeleteMethod::Remove).is_err());
     }
 
     #[test]
@@ -155,7 +171,7 @@ mod tests {
             description: "test".into(),
             size: 1,
         };
-        assert!(delete_targets(&[target], false).is_ok());
+        assert!(delete_targets(&[target], false, DeleteMethod::Remove).is_ok());
         assert!(!path.exists());
     }
 }
