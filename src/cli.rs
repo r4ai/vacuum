@@ -70,7 +70,7 @@ pub struct Cli {
     #[arg(short, long, conflicts_with = "verbose")]
     pub quiet: bool,
 
-    /// Explain why each dropped target was skipped
+    /// Explain why each dropped target was skipped (list and auto modes)
     #[arg(short, long)]
     pub verbose: bool,
 

@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::adapter::{Adapter, CleanTarget, Context, DirStats, WalkLimits, device_of, dir_stats};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::age::AgeIndex;
-use crate::cli::Cli;
+use crate::cli::{Cli, Mode};
 use crate::exclude::Excludes;
 use crate::tracked::TrackedIndex;
 
@@ -43,7 +43,8 @@ impl From<&Cli> for ScanConfig {
                 max_depth: cli.max_depth,
                 one_file_system: cli.one_file_system,
             },
-            verbose: cli.verbose,
+            // The TUI owns the terminal, so safe mode explains nothing.
+            verbose: cli.verbose && cli.mode != Mode::Safe,
             include_tracked: cli.include_tracked,
             enabled: cli.adapters.enabled.clone(),
         }
@@ -541,6 +542,15 @@ mod tests {
 
         assert_eq!(target.adapter, "cargo");
         assert_eq!(build.adapter, "python");
+    }
+
+    /// The TUI owns the terminal; writing to stderr would corrupt it.
+    #[test]
+    fn verbose_is_off_in_safe_mode() {
+        let safe = Cli::try_parse_from(["vacuum", "--verbose"]).unwrap();
+        assert!(!ScanConfig::from(&safe).verbose);
+        let list = Cli::try_parse_from(["vacuum", "--verbose", "-m", "list"]).unwrap();
+        assert!(ScanConfig::from(&list).verbose);
     }
 
     #[test]

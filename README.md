@@ -117,7 +117,7 @@ vacuum ~/projects --mode list --json | jq '.total_size'
 ### 出力量を調整する
 
 - `--quiet`（`-q`）: list モードと auto モードで、エラーと最終結果の 1 行だけを出す。cron などで使う。
-- `--verbose`（`-v`）: 絞り込み（除外、git 管理、期間、サイズ、マウント）で外した候補と、その理由を標準エラーに出す。誤検知を調べるときに使う。
+- `--verbose`（`-v`）: list モードと auto モードで、絞り込み（除外、git 管理、期間、サイズ、マウント）で外した候補と、その理由を標準エラーに出す。誤検知を調べるときに使う。
 
 ```sh
 $ vacuum ~/projects --mode auto --quiet
