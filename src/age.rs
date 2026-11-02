@@ -36,7 +36,11 @@ pub fn project_last_modified(target: &Path) -> Option<SystemTime> {
             continue;
         };
         if entry.path() == target {
-            walk.skip_current_dir();
+            // Skip a directory target's contents; a file target has none.
+            // (On a file, `skip_current_dir` would skip its siblings.)
+            if entry.file_type().is_dir() {
+                walk.skip_current_dir();
+            }
             continue;
         }
         if entry.file_type().is_file()
@@ -68,6 +72,29 @@ mod tests {
         assert_eq!(parse_duration("12h"), Ok(Duration::from_secs(12 * 3600)));
         assert_eq!(parse_duration("30d"), Ok(Duration::from_secs(30 * 86400)));
         assert_eq!(parse_duration("2w"), Ok(Duration::from_secs(14 * 86400)));
+    }
+
+    /// A file target must not hide the files next to it.
+    #[test]
+    fn file_target_does_not_skip_its_siblings() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let old = SystemTime::now() - Duration::from_secs(90 * 86400);
+        let target = dir.path().join("a.pyc");
+        std::fs::write(&target, "").unwrap();
+        for i in 0..50 {
+            let file = dir.path().join(format!("src{i}.py"));
+            std::fs::write(&file, "").unwrap();
+            if i > 0 {
+                std::fs::File::options()
+                    .write(true)
+                    .open(&file)
+                    .unwrap()
+                    .set_modified(old)
+                    .unwrap();
+            }
+        }
+        // Only `src0.py` is new; it must be found wherever it is listed.
+        assert!(!is_older_than(&target, Duration::from_secs(86400)));
     }
 
     #[test]
