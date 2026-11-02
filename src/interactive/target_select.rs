@@ -1151,6 +1151,7 @@ mod tests {
             .iter()
             .map(|name| CleanTarget {
                 path: PathBuf::from("/root").join(name),
+                tracked: false,
                 adapter: "node",
                 description: "test".into(),
                 size: 1500,
