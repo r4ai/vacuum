@@ -29,6 +29,7 @@ fn all_adapters_disabled_exits_cleanly() {
             "--mode",
             "auto",
             "--node=false",
+            "--js-cache=false",
             "--cargo=false",
             "--python=false",
             "--go=false",

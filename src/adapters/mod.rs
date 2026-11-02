@@ -9,6 +9,7 @@ pub mod maven;
 pub mod node;
 pub mod ocaml;
 pub mod python;
+pub mod simple;
 
 pub use cargo::CargoAdapter;
 pub use gitignore::GitignoreAdapter;
@@ -54,6 +55,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         default_enabled: true,
         is_safe: true,
         kind: Kind::Entry(&NodeAdapter),
+    },
+    AdapterSpec {
+        name: "js-cache",
+        label: "JS framework",
+        targets: ".next/, .nuxt/, .svelte-kit/, .turbo/, .parcel-cache/, .angular/",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::JS_CACHE),
     },
     AdapterSpec {
         name: "cargo",
