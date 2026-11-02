@@ -148,10 +148,14 @@ fn walk(
     let ignored_paths: HashSet<PathBuf> = ignored.keys().cloned().collect();
     let (tx, rx) = mpsc::channel();
     std::thread::scope(|scope| {
-        scope.spawn(|| walk_parallel(root, adapters, &ignored_paths, no_size, tx));
+        scope.spawn(|| {
+            // Directory sizes are computed as rayon tasks, so the walk never
+            // waits for them. The scope ends once every size is known.
+            rayon::scope(|sizes| walk_parallel(root, adapters, &ignored_paths, no_size, sizes, tx))
+        });
         for found in rx {
             match found {
-                Found::Adapter(target) => out.emit(target),
+                Found::Adapter(target) | Found::Unsized(target) => out.emit(target),
                 Found::Ignored(path) => {
                     if let Some(target) = ignored.remove(&path) {
                         out.emit(target);
@@ -176,6 +180,9 @@ fn walk(
 enum Found {
     /// An adapter matched the entry.
     Adapter(CleanTarget),
+    /// An adapter matched a directory whose size is not computed yet.
+    /// Never sent through the channel.
+    Unsized(CleanTarget),
     /// The entry is a gitignore match.
     Ignored(PathBuf),
 }
@@ -187,6 +194,7 @@ fn walk_parallel(
     adapters: &[&dyn Adapter],
     ignored: &HashSet<PathBuf>,
     no_size: bool,
+    sizes: &rayon::Scope<'_>,
     tx: mpsc::Sender<Found>,
 ) {
     WalkBuilder::new(root)
@@ -200,7 +208,19 @@ fn walk_parallel(
                 let Ok(entry) = entry else {
                     return WalkState::Continue;
                 };
-                let (state, found) = judge(&entry, adapters, ignored, no_size, &mut ctx);
+                let (state, found) = judge(&entry, adapters, ignored, &mut ctx);
+                let found = match found {
+                    Some(Found::Unsized(mut target)) if !no_size => {
+                        let tx = tx.clone();
+                        sizes.spawn(move |_| {
+                            target.size = compute_dir_size(&target.path);
+                            let _ = tx.send(Found::Adapter(target));
+                        });
+                        None
+                    }
+                    Some(Found::Unsized(target)) => Some(Found::Adapter(target)),
+                    other => other,
+                };
                 if let Some(found) = found
                     && tx.send(found).is_err()
                 {
@@ -213,11 +233,11 @@ fn walk_parallel(
 }
 
 /// Judge one entry: adapters first, in priority order, then gitignore.
+/// A matched directory is returned as [`Found::Unsized`].
 fn judge(
     entry: &DirEntry,
     adapters: &[&dyn Adapter],
     ignored: &HashSet<PathBuf>,
-    no_size: bool,
     ctx: &mut Context,
 ) -> (WalkState, Option<Found>) {
     let path = entry.path();
@@ -246,19 +266,19 @@ fn judge(
     };
 
     if let Some((adapter, description)) = matched {
-        let size = match (no_size, file_type.is_dir()) {
-            (true, _) => 0,
-            (false, true) => compute_dir_size(path),
-            (false, false) => entry.metadata().map(|m| m.len()).unwrap_or(0),
-        };
-        let target = CleanTarget {
+        let mut target = CleanTarget {
             tracked: false,
             path: path.to_path_buf(),
             adapter,
             description,
-            size,
+            size: 0,
         };
-        (skip, Some(Found::Adapter(target)))
+        if file_type.is_dir() {
+            (skip, Some(Found::Unsized(target)))
+        } else {
+            target.size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            (skip, Some(Found::Adapter(target)))
+        }
     } else if ignored.contains(path) {
         (skip, Some(Found::Ignored(path.to_path_buf())))
     } else {

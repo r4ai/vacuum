@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -82,14 +83,37 @@ pub trait Adapter: Send + Sync {
 
 /// Compute the total byte count for a directory tree, best-effort.
 /// Symlinks are not followed; errors on individual entries are skipped.
+/// Sub-directories are measured in parallel on the rayon thread pool.
 pub fn compute_dir_size(path: &Path) -> u64 {
-    walkdir::WalkDir::new(path)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.metadata().ok())
-        .filter(|m| m.is_file())
-        .map(|m| m.len())
+    /// An entry with its directory handle already released.
+    enum Item {
+        Dir(PathBuf),
+        File(u64),
+    }
+
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    // Collect owned data and drop the entries before recursing: on Unix
+    // every `DirEntry` keeps its directory handle open, so holding them
+    // would keep one handle per level open on deep trees.
+    let items: Vec<Item> = entries
+        .flatten()
+        .filter_map(|entry| match entry.file_type() {
+            // `DirEntry::file_type` does not follow symlinks.
+            Ok(t) if t.is_dir() => Some(Item::Dir(entry.path())),
+            Ok(t) if t.is_file() => {
+                Some(Item::File(entry.metadata().map(|m| m.len()).unwrap_or(0)))
+            }
+            _ => None,
+        })
+        .collect();
+    items
+        .par_iter()
+        .map(|item| match item {
+            Item::Dir(dir) => compute_dir_size(dir),
+            Item::File(len) => *len,
+        })
         .sum()
 }
 
@@ -115,6 +139,46 @@ mod tests {
         let mut ctx = Context::default();
         assert!(ctx.has_extension(dir.path(), "py"));
         assert!(!ctx.has_extension(dir.path(), "opam"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compute_dir_size_does_not_follow_symlinks() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        fs::write(outside.path().join("big"), [0u8; 1000]).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+        fs::write(dir.path().join("a"), b"abc").unwrap();
+        assert_eq!(compute_dir_size(dir.path()), 3);
+    }
+
+    #[test]
+    fn compute_dir_size_sums_deep_tree() {
+        let dir = TempDir::new().unwrap();
+        let mut expected = 0;
+        for i in 0..5 {
+            let sub = dir.path().join(format!("d{i}")).join("x").join("y");
+            fs::create_dir_all(&sub).unwrap();
+            for j in 0..10 {
+                fs::write(sub.join(format!("f{j}")), vec![0u8; i + j]).unwrap();
+                expected += (i + j) as u64;
+            }
+        }
+        assert_eq!(compute_dir_size(dir.path()), expected);
+    }
+
+    /// Holding a directory handle per level would exhaust file descriptors
+    /// on deep trees under a low limit (try `ulimit -n 64`).
+    #[test]
+    fn compute_dir_size_handles_deep_tree() {
+        let dir = TempDir::new().unwrap();
+        let mut deepest = dir.path().to_path_buf();
+        for _ in 0..100 {
+            deepest.push("d");
+        }
+        fs::create_dir_all(&deepest).unwrap();
+        fs::write(deepest.join("f"), [0u8; 1000]).unwrap();
+        assert_eq!(compute_dir_size(dir.path()), 1000);
     }
 
     #[test]
