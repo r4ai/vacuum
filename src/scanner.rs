@@ -1,6 +1,7 @@
+use ignore::{DirEntry, WalkBuilder, WalkState};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+use std::sync::mpsc;
 
 use crate::adapter::{Adapter, CleanTarget, Context, compute_dir_size};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
@@ -134,61 +135,23 @@ fn walk(
         );
     }
 
-    let mut ctx = Context::default();
-    let mut iter = WalkDir::new(root).follow_links(false).into_iter();
-
-    while let Some(entry) = iter.next() {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => continue,
-        };
-        let path = entry.path();
-        let Some(parent) = path.parent() else {
-            continue;
-        };
-        let name = entry.file_name().to_string_lossy();
-        let file_type = entry.file_type();
-
-        if file_type.is_dir() {
-            let matched = adapters.iter().find_map(|a| {
-                a.match_dir(&name, parent, &mut ctx)
-                    .map(|description| (a.name(), description))
-            });
-            if let Some((adapter, description)) = matched {
-                let size = if no_size { 0 } else { compute_dir_size(path) };
-                out.emit(CleanTarget {
-                    path: path.to_path_buf(),
-                    adapter,
-                    description,
-                    size,
-                });
-                iter.skip_current_dir();
-            } else if let Some(target) = ignored.remove(path) {
-                out.emit(target);
-                iter.skip_current_dir();
-            }
-        } else if file_type.is_file() {
-            let matched = adapters.iter().find_map(|a| {
-                a.match_file(&name, parent, &mut ctx)
-                    .map(|description| (a.name(), description))
-            });
-            if let Some((adapter, description)) = matched {
-                let size = if no_size {
-                    0
-                } else {
-                    entry.metadata().map(|m| m.len()).unwrap_or(0)
-                };
-                out.emit(CleanTarget {
-                    path: path.to_path_buf(),
-                    adapter,
-                    description,
-                    size,
-                });
-            } else if let Some(target) = ignored.remove(path) {
-                out.emit(target);
+    // Worker threads judge entries; this thread reports what they find,
+    // since `on_found` need not be `Send`.
+    let ignored_paths: HashSet<PathBuf> = ignored.keys().cloned().collect();
+    let (tx, rx) = mpsc::channel();
+    std::thread::scope(|scope| {
+        scope.spawn(|| walk_parallel(root, adapters, &ignored_paths, no_size, tx));
+        for found in rx {
+            match found {
+                Found::Adapter(target) => out.emit(target),
+                Found::Ignored(path) => {
+                    if let Some(target) = ignored.remove(&path) {
+                        out.emit(target);
+                    }
+                }
             }
         }
-    }
+    });
 
     // Gitignore matches the walk did not reach. Those inside an emitted
     // target are already covered by it.
@@ -198,6 +161,99 @@ fn walk(
         if !out.covers(&target.path) {
             out.emit(target);
         }
+    }
+}
+
+/// A match found by a worker thread of [`walk_parallel`].
+enum Found {
+    /// An adapter matched the entry.
+    Adapter(CleanTarget),
+    /// The entry is a gitignore match.
+    Ignored(PathBuf),
+}
+
+/// Walk `root` on several threads and send each match through `tx`.
+/// The walk does not descend into a matched directory.
+fn walk_parallel(
+    root: &Path,
+    adapters: &[&dyn Adapter],
+    ignored: &HashSet<PathBuf>,
+    no_size: bool,
+    tx: mpsc::Sender<Found>,
+) {
+    WalkBuilder::new(root)
+        .standard_filters(false)
+        .follow_links(false)
+        .build_parallel()
+        .run(|| {
+            let tx = tx.clone();
+            let mut ctx = Context::default();
+            Box::new(move |entry| {
+                let Ok(entry) = entry else {
+                    return WalkState::Continue;
+                };
+                let (state, found) = judge(&entry, adapters, ignored, no_size, &mut ctx);
+                if let Some(found) = found
+                    && tx.send(found).is_err()
+                {
+                    // The receiver is gone; nobody needs more results.
+                    return WalkState::Quit;
+                }
+                state
+            })
+        });
+}
+
+/// Judge one entry: adapters first, in priority order, then gitignore.
+fn judge(
+    entry: &DirEntry,
+    adapters: &[&dyn Adapter],
+    ignored: &HashSet<PathBuf>,
+    no_size: bool,
+    ctx: &mut Context,
+) -> (WalkState, Option<Found>) {
+    let path = entry.path();
+    let (Some(parent), Some(file_type)) = (path.parent(), entry.file_type()) else {
+        return (WalkState::Continue, None);
+    };
+    let name = entry.file_name().to_string_lossy();
+
+    let matched = if file_type.is_dir() {
+        adapters.iter().find_map(|a| {
+            a.match_dir(&name, parent, ctx)
+                .map(|description| (a.name(), description))
+        })
+    } else if file_type.is_file() {
+        adapters.iter().find_map(|a| {
+            a.match_file(&name, parent, ctx)
+                .map(|description| (a.name(), description))
+        })
+    } else {
+        None
+    };
+    let skip = if file_type.is_dir() {
+        WalkState::Skip
+    } else {
+        WalkState::Continue
+    };
+
+    if let Some((adapter, description)) = matched {
+        let size = match (no_size, file_type.is_dir()) {
+            (true, _) => 0,
+            (false, true) => compute_dir_size(path),
+            (false, false) => entry.metadata().map(|m| m.len()).unwrap_or(0),
+        };
+        let target = CleanTarget {
+            path: path.to_path_buf(),
+            adapter,
+            description,
+            size,
+        };
+        (skip, Some(Found::Adapter(target)))
+    } else if ignored.contains(path) {
+        (skip, Some(Found::Ignored(path.to_path_buf())))
+    } else {
+        (WalkState::Continue, None)
     }
 }
 
