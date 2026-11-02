@@ -45,6 +45,11 @@ pub struct Cli {
     #[arg(long)]
     pub trash: bool,
 
+    /// Only list targets whose project has not changed for DURATION
+    /// (e.g. 12h, 30d, 2w). The target itself does not count as a change.
+    #[arg(long, value_name = "DURATION", value_parser = crate::age::parse_duration)]
+    pub older_than: Option<std::time::Duration>,
+
     /// Skip size calculation to speed up scanning [default: off]
     #[arg(long, default_value_t = false, help_heading = "Performance")]
     pub no_size: bool,

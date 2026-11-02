@@ -2,9 +2,11 @@ use ignore::{DirEntry, WalkBuilder, WalkState};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::time::Duration;
 
 use crate::adapter::{Adapter, CleanTarget, Context, dir_stats};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
+use crate::age;
 use crate::cli::Cli;
 use crate::exclude::Excludes;
 use crate::tracked::TrackedIndex;
@@ -14,6 +16,8 @@ use crate::tracked::TrackedIndex;
 #[derive(Clone, Debug)]
 pub struct ScanConfig {
     pub no_size: bool,
+    /// Only keep targets whose project is older than this (`--older-than`).
+    pub older_than: Option<Duration>,
     /// Extra gitignore-style patterns to exclude (`--exclude`).
     pub exclude: Vec<String>,
     /// Whether to keep targets that contain files tracked by git.
@@ -27,6 +31,7 @@ impl From<&Cli> for ScanConfig {
         Self {
             no_size: cli.no_size,
             exclude: cli.exclude.clone(),
+            older_than: cli.older_than,
             include_tracked: cli.include_tracked,
             enabled: cli.adapters.enabled.clone(),
         }
@@ -84,8 +89,12 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
 #[cfg(test)]
 pub fn scan_with(adapter: impl Adapter, root: &Path) -> Vec<CleanTarget> {
     let mut all: Vec<CleanTarget> = Vec::new();
-    let excludes = Excludes::none();
-    walk(root, &[&adapter], false, false, true, &excludes, &mut |t| {
+    let filters = Filters {
+        excludes: Excludes::none(),
+        include_tracked: true,
+        older_than: None,
+    };
+    walk(root, &[&adapter], false, false, &filters, &mut |t| {
         all.push(t)
     });
     all.sort_by(|a, b| a.path.cmp(&b.path));
@@ -100,14 +109,17 @@ pub fn scan_streaming(
     cfg: &ScanConfig,
     on_found: &mut dyn FnMut(CleanTarget),
 ) -> anyhow::Result<()> {
-    let excludes = Excludes::new(root, &cfg.exclude)?;
+    let filters = Filters {
+        excludes: Excludes::new(root, &cfg.exclude)?,
+        include_tracked: cfg.include_tracked,
+        older_than: cfg.older_than,
+    };
     walk(
         root,
         &cfg.entry_adapters(),
         cfg.gitignore_enabled(),
         cfg.no_size,
-        cfg.include_tracked,
-        &excludes,
+        &filters,
         on_found,
     );
     Ok(())
@@ -119,18 +131,17 @@ fn walk(
     adapters: &[&dyn Adapter],
     gitignore: bool,
     no_size: bool,
-    include_tracked: bool,
-    excludes: &Excludes,
+    filters: &Filters,
     on_found: &mut dyn FnMut(CleanTarget),
 ) {
     let mut out = Emitter {
         emitted: HashSet::new(),
         no_size,
-        include_tracked,
+        filters,
         tracked: TrackedIndex::default(),
-        excludes,
         on_found,
     };
+    let excludes = &filters.excludes;
 
     if adapters.is_empty() {
         // Only gitignore can be enabled — no need for a second walk.
@@ -311,12 +322,20 @@ fn judge(
 }
 
 /// Reports each target once and remembers what was reported.
+/// Which found targets are reported.
+struct Filters {
+    excludes: Excludes,
+    /// Whether to keep targets that contain files tracked by git.
+    include_tracked: bool,
+    /// Only keep targets whose project is older than this.
+    older_than: Option<Duration>,
+}
+
 struct Emitter<'a> {
     emitted: HashSet<PathBuf>,
     no_size: bool,
-    include_tracked: bool,
+    filters: &'a Filters,
     tracked: TrackedIndex,
-    excludes: &'a Excludes,
     on_found: &'a mut dyn FnMut(CleanTarget),
 }
 
@@ -329,13 +348,18 @@ impl Emitter<'_> {
         // A directory is deleted as a whole, so it must not hold an
         // excluded path either.
         let is_dir = target.path.is_dir();
-        if self.excludes.is_excluded(&target.path, is_dir)
-            || (is_dir && self.excludes.contains_excluded(&target.path))
+        if self.filters.excludes.is_excluded(&target.path, is_dir)
+            || (is_dir && self.filters.excludes.contains_excluded(&target.path))
+        {
+            return;
+        }
+        if let Some(older_than) = self.filters.older_than
+            && !age::is_older_than(&target.path, older_than)
         {
             return;
         }
         target.tracked = self.tracked.is_tracked(&target.path, nested.as_deref());
-        if target.tracked && !self.include_tracked {
+        if target.tracked && !self.filters.include_tracked {
             return;
         }
         if self.emitted.insert(target.path.clone()) {

@@ -4,6 +4,7 @@ use std::process::ExitCode;
 
 mod adapter;
 mod adapters;
+mod age;
 mod cleaner;
 mod cli;
 mod display;
