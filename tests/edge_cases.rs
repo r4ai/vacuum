@@ -37,6 +37,7 @@ fn all_adapters_disabled_exits_cleanly() {
             "--gradle=false",
             "--maven=false",
             "--ocaml=false",
+            "--terraform=false",
             "--scala=false",
             "--ruby=false",
             "--php=false",
