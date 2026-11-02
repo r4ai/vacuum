@@ -81,29 +81,86 @@ pub trait Adapter: Send + Sync {
     }
 }
 
+/// How far a scan walks (`--max-depth`, `--one-file-system`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WalkLimits {
+    /// Deepest level walked; the scan root's children are at depth 1.
+    pub max_depth: Option<usize>,
+    /// Whether to stay on the scan root's file system.
+    pub one_file_system: bool,
+}
+
+impl WalkLimits {
+    /// The limits for a walk that starts `depth` levels below the root.
+    pub fn below(self, depth: usize) -> Self {
+        Self {
+            max_depth: self.max_depth.map(|max| max.saturating_sub(depth)),
+            ..self
+        }
+    }
+}
+
 /// Compute the total byte count for a directory tree, best-effort.
 /// Symlinks are not followed; errors on individual entries are skipped.
 /// Sub-directories are measured in parallel on the rayon thread pool.
 pub fn compute_dir_size(path: &Path) -> u64 {
-    dir_stats(path, true).size
+    dir_stats(path, true, false).size
 }
 
 /// What one walk of a directory tree learns.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct DirStats {
     /// Total byte count of regular files; 0 unless requested.
     pub size: u64,
     /// Every directory at or below the root that holds a `.git` entry.
     pub repos: Vec<PathBuf>,
+    /// Whether the tree holds a directory on another file system. Only
+    /// detected when the walk stays on one file system.
+    pub crosses_mount: bool,
+}
+
+impl DirStats {
+    fn merge(mut self, other: Self) -> Self {
+        self.size += other.size;
+        self.repos.extend(other.repos);
+        self.crosses_mount |= other.crosses_mount;
+        self
+    }
 }
 
 /// Walk the tree at `path` once, in parallel, and collect [`DirStats`].
 /// Symlinks are not followed; errors on individual entries are skipped.
-pub fn dir_stats(path: &Path, with_size: bool) -> DirStats {
+/// With `one_file_system`, directories on another file system are not
+/// entered but reported in [`DirStats::crosses_mount`].
+pub fn dir_stats(path: &Path, with_size: bool, one_file_system: bool) -> DirStats {
+    let device = if one_file_system {
+        device_of(path)
+    } else {
+        None
+    };
+    dir_stats_on(path, with_size, device)
+}
+
+/// The device a path lives on, where the platform tells. Symlinks are
+/// not followed.
+#[cfg(unix)]
+pub fn device_of(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::symlink_metadata(path).ok().map(|m| m.dev())
+}
+
+#[cfg(not(unix))]
+pub fn device_of(_path: &Path) -> Option<u64> {
+    None
+}
+
+/// [`dir_stats`] that stays on `device`, if given.
+fn dir_stats_on(path: &Path, with_size: bool, device: Option<u64>) -> DirStats {
     /// An entry with its directory handle already released.
     enum Item {
         Dir(PathBuf),
         File(u64),
+        ForeignMount,
     }
 
     let Ok(entries) = std::fs::read_dir(path) else {
@@ -121,7 +178,14 @@ pub fn dir_stats(path: &Path, with_size: bool) -> DirStats {
             }
             match entry.file_type() {
                 // `DirEntry::file_type` does not follow symlinks.
-                Ok(t) if t.is_dir() => Some(Item::Dir(entry.path())),
+                Ok(t) if t.is_dir() => {
+                    let path = entry.path();
+                    if device.is_some() && device_of(&path) != device {
+                        Some(Item::ForeignMount)
+                    } else {
+                        Some(Item::Dir(path))
+                    }
+                }
                 Ok(t) if t.is_file() && with_size => {
                     Some(Item::File(entry.metadata().map(|m| m.len()).unwrap_or(0)))
                 }
@@ -132,17 +196,17 @@ pub fn dir_stats(path: &Path, with_size: bool) -> DirStats {
     let mut stats = items
         .par_iter()
         .map(|item| match item {
-            Item::Dir(dir) => dir_stats(dir, with_size),
+            Item::Dir(dir) => dir_stats_on(dir, with_size, device),
             Item::File(len) => DirStats {
                 size: *len,
-                repos: Vec::new(),
+                ..DirStats::default()
+            },
+            Item::ForeignMount => DirStats {
+                crosses_mount: true,
+                ..DirStats::default()
             },
         })
-        .reduce(DirStats::default, |mut a, b| {
-            a.size += b.size;
-            a.repos.extend(b.repos);
-            a
-        });
+        .reduce(DirStats::default, DirStats::merge);
     if is_repo {
         stats.repos.push(path.to_path_buf());
     }
@@ -219,9 +283,31 @@ mod tests {
         let lib = dir.path().join("vendor").join("lib");
         fs::create_dir_all(lib.join(".git")).unwrap();
         fs::write(lib.join("a.go"), b"abc").unwrap();
-        let stats = dir_stats(dir.path(), false);
+        let stats = dir_stats(dir.path(), false, false);
         assert_eq!(stats.repos, vec![lib]);
         assert_eq!(stats.size, 0, "size is not computed when not requested");
+    }
+
+    #[test]
+    fn walk_limits_below_reduces_max_depth() {
+        let limits = WalkLimits {
+            max_depth: Some(3),
+            one_file_system: true,
+        };
+        assert_eq!(limits.below(2).max_depth, Some(1));
+        assert_eq!(limits.below(5).max_depth, Some(0));
+        assert!(limits.below(2).one_file_system);
+        assert_eq!(WalkLimits::default().below(2).max_depth, None);
+    }
+
+    #[test]
+    fn dir_stats_on_one_file_system_sees_no_mount_in_a_plain_tree() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("a").join("b")).unwrap();
+        fs::write(dir.path().join("a").join("b").join("f"), b"abcd").unwrap();
+        let stats = dir_stats(dir.path(), true, true);
+        assert_eq!(stats.size, 4);
+        assert!(!stats.crosses_mount);
     }
 
     #[test]

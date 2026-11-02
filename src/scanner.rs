@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::adapter::{Adapter, CleanTarget, Context, dir_stats};
+use crate::adapter::{Adapter, CleanTarget, Context, DirStats, WalkLimits, device_of, dir_stats};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::age::AgeIndex;
 use crate::cli::Cli;
@@ -20,6 +20,8 @@ pub struct ScanConfig {
     pub older_than: Option<Duration>,
     /// Only keep targets of at least this many bytes (`--min-size`).
     pub min_size: Option<u64>,
+    /// How far the walks go.
+    pub limits: WalkLimits,
     /// Extra gitignore-style patterns to exclude (`--exclude`).
     pub exclude: Vec<String>,
     /// Whether to keep targets that contain files tracked by git.
@@ -35,6 +37,10 @@ impl From<&Cli> for ScanConfig {
             exclude: cli.exclude.clone(),
             older_than: cli.older_than,
             min_size: cli.min_size.map(|s| s.as_u64()),
+            limits: WalkLimits {
+                max_depth: cli.max_depth,
+                one_file_system: cli.one_file_system,
+            },
             include_tracked: cli.include_tracked,
             enabled: cli.adapters.enabled.clone(),
         }
@@ -97,6 +103,7 @@ pub fn scan_with(adapter: impl Adapter, root: &Path) -> Vec<CleanTarget> {
         include_tracked: true,
         older_than: None,
         min_size: None,
+        limits: WalkLimits::default(),
     };
     walk(root, &[&adapter], false, false, &filters, &mut |t| {
         all.push(t)
@@ -118,6 +125,7 @@ pub fn scan_streaming(
         include_tracked: cfg.include_tracked,
         older_than: cfg.older_than,
         min_size: cfg.min_size,
+        limits: cfg.limits,
     };
     walk(
         root,
@@ -147,12 +155,11 @@ fn walk(
         ages: AgeIndex::default(),
         on_found,
     };
-    let excludes = &filters.excludes;
 
     if adapters.is_empty() {
         // Only gitignore can be enabled — no need for a second walk.
         if gitignore {
-            for target in scan_gitignore(root, excludes) {
+            for target in scan_gitignore(root, filters) {
                 out.emit(target, None);
             }
         }
@@ -165,7 +172,7 @@ fn walk(
     let mut ignored: HashMap<PathBuf, CleanTarget> = HashMap::new();
     if gitignore {
         ignored.extend(
-            scan_gitignore(root, excludes)
+            scan_gitignore(root, filters)
                 .into_iter()
                 .map(|t| (t.path.clone(), t)),
         );
@@ -180,12 +187,12 @@ fn walk(
             // Directory sizes are computed as rayon tasks, so the walk never
             // waits for them. The scope ends once every size is known.
             rayon::scope(|sizes| {
-                walk_parallel(root, adapters, &ignored_paths, no_size, excludes, sizes, tx)
+                walk_parallel(root, adapters, &ignored_paths, no_size, filters, sizes, tx)
             })
         });
         for found in rx {
             match found {
-                Found::Adapter(target, nested) => out.emit(target, Some(nested)),
+                Found::Adapter(target, stats) => out.emit(target, Some(stats)),
                 Found::Unsized(target) => out.emit(target, None),
                 Found::Ignored(path) => {
                     if let Some(target) = ignored.remove(&path) {
@@ -209,9 +216,9 @@ fn walk(
 
 /// A match found by a worker thread of [`walk_parallel`].
 enum Found {
-    /// An adapter matched the entry. Also carries the repository roots
-    /// at or below it (see [`dir_stats`]).
-    Adapter(CleanTarget, Vec<PathBuf>),
+    /// An adapter matched the entry. Also carries what a walk of its tree
+    /// learned (see [`dir_stats`]).
+    Adapter(CleanTarget, DirStats),
     /// An adapter matched a directory whose size is not computed yet.
     /// Never sent through the channel.
     Unsized(CleanTarget),
@@ -226,13 +233,22 @@ fn walk_parallel(
     adapters: &[&dyn Adapter],
     ignored: &HashSet<PathBuf>,
     no_size: bool,
-    excludes: &Excludes,
+    filters: &Filters,
     sizes: &rayon::Scope<'_>,
     tx: mpsc::Sender<Found>,
 ) {
+    let excludes = &filters.excludes;
+    let one_file_system = filters.limits.one_file_system;
+    let root_device = if one_file_system {
+        device_of(root)
+    } else {
+        None
+    };
     WalkBuilder::new(root)
         .standard_filters(false)
         .follow_links(false)
+        .max_depth(filters.limits.max_depth)
+        .same_file_system(filters.limits.one_file_system)
         .build_parallel()
         .run(|| {
             let tx = tx.clone();
@@ -241,16 +257,17 @@ fn walk_parallel(
                 let Ok(entry) = entry else {
                     return WalkState::Continue;
                 };
-                let (state, found) = judge(&entry, adapters, ignored, excludes, &mut ctx);
+                let (state, found) =
+                    judge(&entry, adapters, ignored, excludes, root_device, &mut ctx);
                 let found = match found {
                     Some(Found::Unsized(mut target)) => {
                         // Directory walks run as rayon tasks, off the walk.
                         let tx = tx.clone();
                         sizes.spawn(move |_| {
                             // One walk yields the size and nested repositories.
-                            let stats = dir_stats(&target.path, !no_size);
+                            let stats = dir_stats(&target.path, !no_size, one_file_system);
                             target.size = stats.size;
-                            let _ = tx.send(Found::Adapter(target, stats.repos));
+                            let _ = tx.send(Found::Adapter(target, stats));
                         });
                         None
                     }
@@ -274,12 +291,18 @@ fn judge(
     adapters: &[&dyn Adapter],
     ignored: &HashSet<PathBuf>,
     excludes: &Excludes,
+    root_device: Option<u64>,
     ctx: &mut Context,
 ) -> (WalkState, Option<Found>) {
     let path = entry.path();
     let (Some(parent), Some(file_type)) = (path.parent(), entry.file_type()) else {
         return (WalkState::Continue, None);
     };
+    // With `--one-file-system`, a mount point is yielded but must be
+    // neither a target nor walked into.
+    if root_device.is_some() && file_type.is_dir() && device_of(path) != root_device {
+        return (WalkState::Skip, None);
+    }
     if excludes.is_excluded(path, file_type.is_dir()) {
         // Neither a target nor walked into.
         return (WalkState::Skip, None);
@@ -318,7 +341,7 @@ fn judge(
         } else {
             target.size = entry.metadata().map(|m| m.len()).unwrap_or(0);
             // A file holds no repository.
-            (skip, Some(Found::Adapter(target, Vec::new())))
+            (skip, Some(Found::Adapter(target, DirStats::default())))
         }
     } else if ignored.contains(path) {
         (skip, Some(Found::Ignored(path.to_path_buf())))
@@ -337,6 +360,8 @@ struct Filters {
     older_than: Option<Duration>,
     /// Only keep targets of at least this many bytes.
     min_size: Option<u64>,
+    /// How far the walks go.
+    limits: WalkLimits,
 }
 
 struct Emitter<'a> {
@@ -352,8 +377,8 @@ impl Emitter<'_> {
     /// Report `target`, unless it was reported already, is excluded, or
     /// contains tracked files that are not wanted. The checks here also
     /// cover gitignore matches.
-    /// `nested` are the repository roots at or below the target, if known.
-    fn emit(&mut self, mut target: CleanTarget, nested: Option<Vec<PathBuf>>) {
+    /// `stats` describe the target's tree, if already known.
+    fn emit(&mut self, mut target: CleanTarget, stats: Option<DirStats>) {
         // A directory is deleted as a whole, so it must not hold an
         // excluded path either.
         let is_dir = target.path.is_dir();
@@ -370,7 +395,17 @@ impl Emitter<'_> {
         {
             return;
         }
-        target.tracked = self.tracked.is_tracked(&target.path, nested.as_deref());
+        let one_file_system = self.filters.limits.one_file_system;
+        let stats = match stats {
+            Some(stats) => stats,
+            None if is_dir => dir_stats(&target.path, false, one_file_system),
+            None => DirStats::default(),
+        };
+        // Deleting the target would delete files on another file system.
+        if one_file_system && stats.crosses_mount {
+            return;
+        }
+        target.tracked = self.tracked.is_tracked(&target.path, Some(&stats.repos));
         if target.tracked && !self.filters.include_tracked {
             return;
         }
@@ -390,10 +425,10 @@ impl Emitter<'_> {
 
 /// Run the gitignore adapter, reporting a failure as a warning.
 /// Excluded paths are not walked.
-fn scan_gitignore(root: &Path, excludes: &Excludes) -> Vec<CleanTarget> {
-    let excluded = |path: &Path, is_dir| excludes.is_excluded(path, is_dir);
+fn scan_gitignore(root: &Path, filters: &Filters) -> Vec<CleanTarget> {
+    let excluded = |path: &Path, is_dir| filters.excludes.is_excluded(path, is_dir);
     GitignoreAdapter
-        .scan_except(root, &excluded)
+        .scan_except(root, &excluded, filters.limits)
         .unwrap_or_else(|e| {
             eprintln!("Warning: adapter '{}' failed: {e}", GitignoreAdapter::NAME);
             Vec::new()
