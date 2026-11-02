@@ -71,7 +71,10 @@ fn run() -> anyhow::Result<()> {
             } else {
                 cleaner::remove_all(&targets, cli.delete_method(), |_| {})
             };
-            println!("{}", report::to_json(&targets, &outcome, dry_run));
+            println!(
+                "{}",
+                report::to_json(&targets, &outcome, dry_run, cli.delete_method())
+            );
             if !outcome.errors.is_empty() {
                 anyhow::bail!("failed to delete {} target(s)", outcome.errors.len());
             }
