@@ -6,12 +6,15 @@ use std::sync::mpsc;
 use crate::adapter::{Adapter, CleanTarget, Context, compute_dir_size};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::cli::Cli;
+use crate::exclude::Excludes;
 
 /// Scanner settings extracted from CLI flags.
 /// This is `Clone + Send + 'static`, enabling use across thread boundaries.
 #[derive(Clone, Debug)]
 pub struct ScanConfig {
     pub no_size: bool,
+    /// Extra gitignore-style patterns to exclude (`--exclude`).
+    pub exclude: Vec<String>,
     /// Names of the enabled adapters (see [`REGISTRY`]).
     pub enabled: HashSet<&'static str>,
 }
@@ -20,6 +23,7 @@ impl From<&Cli> for ScanConfig {
     fn from(cli: &Cli) -> Self {
         Self {
             no_size: cli.no_size,
+            exclude: cli.exclude.clone(),
             enabled: cli.adapters.enabled.clone(),
         }
     }
@@ -76,7 +80,10 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
 #[cfg(test)]
 pub fn scan_with(adapter: impl Adapter, root: &Path) -> Vec<CleanTarget> {
     let mut all: Vec<CleanTarget> = Vec::new();
-    walk(root, &[&adapter], false, false, &mut |t| all.push(t));
+    let excludes = Excludes::none();
+    walk(root, &[&adapter], false, false, &excludes, &mut |t| {
+        all.push(t)
+    });
     all.sort_by(|a, b| a.path.cmp(&b.path));
     all
 }
@@ -89,11 +96,13 @@ pub fn scan_streaming(
     cfg: &ScanConfig,
     on_found: &mut dyn FnMut(CleanTarget),
 ) -> anyhow::Result<()> {
+    let excludes = Excludes::new(root, &cfg.exclude)?;
     walk(
         root,
         &cfg.entry_adapters(),
         cfg.gitignore_enabled(),
         cfg.no_size,
+        &excludes,
         on_found,
     );
     Ok(())
@@ -105,11 +114,13 @@ fn walk(
     adapters: &[&dyn Adapter],
     gitignore: bool,
     no_size: bool,
+    excludes: &Excludes,
     on_found: &mut dyn FnMut(CleanTarget),
 ) {
     let mut out = Emitter {
         emitted: HashSet::new(),
         no_size,
+        excludes,
         on_found,
     };
 
@@ -143,7 +154,9 @@ fn walk(
         scope.spawn(|| {
             // Directory sizes are computed as rayon tasks, so the walk never
             // waits for them. The scope ends once every size is known.
-            rayon::scope(|sizes| walk_parallel(root, adapters, &ignored_paths, no_size, sizes, tx))
+            rayon::scope(|sizes| {
+                walk_parallel(root, adapters, &ignored_paths, no_size, excludes, sizes, tx)
+            })
         });
         for found in rx {
             match found {
@@ -186,6 +199,7 @@ fn walk_parallel(
     adapters: &[&dyn Adapter],
     ignored: &HashSet<PathBuf>,
     no_size: bool,
+    excludes: &Excludes,
     sizes: &rayon::Scope<'_>,
     tx: mpsc::Sender<Found>,
 ) {
@@ -200,7 +214,7 @@ fn walk_parallel(
                 let Ok(entry) = entry else {
                     return WalkState::Continue;
                 };
-                let (state, found) = judge(&entry, adapters, ignored, &mut ctx);
+                let (state, found) = judge(&entry, adapters, ignored, excludes, &mut ctx);
                 let found = match found {
                     Some(Found::Unsized(mut target)) if !no_size => {
                         let tx = tx.clone();
@@ -230,12 +244,17 @@ fn judge(
     entry: &DirEntry,
     adapters: &[&dyn Adapter],
     ignored: &HashSet<PathBuf>,
+    excludes: &Excludes,
     ctx: &mut Context,
 ) -> (WalkState, Option<Found>) {
     let path = entry.path();
     let (Some(parent), Some(file_type)) = (path.parent(), entry.file_type()) else {
         return (WalkState::Continue, None);
     };
+    if excludes.is_excluded(path, file_type.is_dir()) {
+        // Neither a target nor walked into.
+        return (WalkState::Skip, None);
+    }
     let name = entry.file_name().to_string_lossy();
 
     let matched = if file_type.is_dir() {
@@ -281,11 +300,20 @@ fn judge(
 struct Emitter<'a> {
     emitted: HashSet<PathBuf>,
     no_size: bool,
+    excludes: &'a Excludes,
     on_found: &'a mut dyn FnMut(CleanTarget),
 }
 
 impl Emitter<'_> {
+    /// Report `target`, unless it was reported already or is excluded.
+    /// The exclusion check here also covers gitignore matches.
     fn emit(&mut self, mut target: CleanTarget) {
+        if self
+            .excludes
+            .is_excluded(&target.path, target.path.is_dir())
+        {
+            return;
+        }
         if self.emitted.insert(target.path.clone()) {
             if self.no_size {
                 target.size = 0;

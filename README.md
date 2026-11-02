@@ -41,6 +41,22 @@ vacuum ~/projects --dry-run
 vacuum ~/projects --mode auto --no-size
 ```
 
+### 除外
+
+`--exclude <GLOB>` に一致するパスは、走査も削除もしない。複数回指定できる。
+スキャンルートの `.vacuumignore` も読み込む。どちらも gitignore と同じ書式で、スキャンルートからの相対パスで書く。
+
+```sh
+# 作業中のプロジェクトと、巨大な .venv を残す
+vacuum ~/projects --exclude work/current --exclude '*.venv'
+```
+
+```gitignore
+# ~/projects/.vacuumignore
+work/current/
+*.venv
+```
+
 ### 終了コード
 
 削除に 1 件でも失敗すると、終了コード 1 で終わる。スクリプトや CI から失敗を検知できる。

@@ -7,6 +7,7 @@ mod adapters;
 mod cleaner;
 mod cli;
 mod display;
+mod exclude;
 mod interactive;
 mod scanner;
 
@@ -44,6 +45,9 @@ fn run() -> anyhow::Result<()> {
     if !root.is_dir() {
         anyhow::bail!("{} is not a directory", root.display());
     }
+
+    // Reject invalid exclude patterns before starting either mode.
+    exclude::Excludes::new(&root, &cli.exclude)?;
 
     match cli.mode {
         // ── Safe mode: full TUI workflow ──────────────────────────────────────

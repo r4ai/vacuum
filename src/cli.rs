@@ -31,6 +31,11 @@ pub struct Cli {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Exclude paths matching GLOB (gitignore syntax, relative to PATH).
+    /// Can be given more than once. `PATH/.vacuumignore` is also read.
+    #[arg(long, value_name = "GLOB")]
+    pub exclude: Vec<String>,
+
     /// Skip size calculation to speed up scanning [default: off]
     #[arg(long, default_value_t = false, help_heading = "Performance")]
     pub no_size: bool,
