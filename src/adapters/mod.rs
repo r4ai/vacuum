@@ -137,6 +137,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         kind: Kind::Entry(&simple::SWIFT),
     },
     AdapterSpec {
+        name: "haskell",
+        label: "Haskell",
+        targets: ".stack-work/, dist-newstyle/",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::HASKELL),
+    },
+    AdapterSpec {
         name: GitignoreAdapter::NAME,
         label: "Gitignore",
         targets: ".gitignore-matched paths",

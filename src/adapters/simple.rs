@@ -140,6 +140,24 @@ pub static SWIFT: SimpleAdapter = SimpleAdapter {
     }],
 };
 
+/// Stack and Cabal build output.
+pub static HASKELL: SimpleAdapter = SimpleAdapter {
+    name: "haskell",
+    label: "Haskell build output",
+    rules: &[
+        Rule {
+            dirs: &[".stack-work"],
+            context: &["stack.yaml"],
+            unless_inside: &[],
+        },
+        Rule {
+            dirs: &["dist-newstyle"],
+            context: &["*.cabal", "cabal.project"],
+            unless_inside: &[],
+        },
+    ],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
