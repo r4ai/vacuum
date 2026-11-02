@@ -84,7 +84,7 @@ fn anchor_home(pattern: &str, root: &Path) -> Option<String> {
         return Some(pattern.to_string());
     };
     let home = PathBuf::from(std::env::var_os("HOME")?);
-    let home = home.canonicalize().unwrap_or(home);
+    let home = dunce::canonicalize(&home).unwrap_or(home);
     let relative = home.join(rest);
     let relative = relative.strip_prefix(root).ok()?;
     Some(format!("/{}", relative.display()))
