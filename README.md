@@ -6,6 +6,10 @@ https://github.com/user-attachments/assets/1f263a29-222e-4bf8-9101-e04cb53ac56c
 
 ## インストール
 
+[GitHub Releases](https://github.com/r4ai/vacuum/releases) から、各 OS 向けのビルド済みバイナリを入手できる（Linux x86_64 / aarch64、macOS x86_64 / aarch64、Windows x86_64）。
+
+ソースからビルドする場合:
+
 ```sh
 cargo install --path .
 ```
@@ -279,6 +283,16 @@ hyperfine --warmup 3 \
 - 生成するツリーは決定的で、同じ引数なら毎回同じになる。
 - 変更前後を比べるときは、それぞれのバイナリを別名でコピーし、1 回の `hyperfine` で並べて計測する。
 - 上の手順はページキャッシュが温まった状態を測る。コールドキャッシュを測るなら、Linux では `--prepare 'sync; echo 3 | sudo tee /proc/sys/vm/drop_caches'` を付ける。
+
+### リリース
+
+`v0.2.0` のようなタグを push すると、`.github/workflows/release.yml` が各 OS 向けにビルドし、GitHub Release を作ってアーカイブと `SHA256SUMS` を添付する。
+タグを打つ前に、`Cargo.toml` の `version` をタグと合わせる。
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
 
 ### アダプターの追加
 
