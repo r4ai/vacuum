@@ -14,6 +14,7 @@ use crossterm::{cursor, execute};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
+use crate::adapter::CleanTarget;
 use crate::cli::Cli;
 use crate::roots::Roots;
 use crate::scanner::ScanConfig;
@@ -42,6 +43,8 @@ pub enum TuiResult {
     Completed {
         freed: u64,
         errors: Vec<(String, String)>,
+        /// The targets chosen for deletion, removed or not.
+        targets: Vec<CleanTarget>,
     },
     Cancelled,
 }
@@ -84,6 +87,7 @@ fn run_loop(
                         return Ok(TuiResult::Completed {
                             freed: 0,
                             errors: vec![],
+                            targets: vec![],
                         });
                     }
                     phase = Phase::TargetSelection(App::new(targets, roots.base.clone()));
@@ -95,9 +99,7 @@ fn run_loop(
                 s.drain();
                 // Auto-exit after Done state has been rendered at least once
                 if was_finished && s.finished {
-                    let freed = s.freed;
-                    let errors = std::mem::take(&mut s.errors);
-                    return Ok(TuiResult::Completed { freed, errors });
+                    return Ok(s.take_result());
                 }
             }
             _ => {}
@@ -125,9 +127,7 @@ fn run_loop(
                     match &mut phase {
                         Phase::Deleting(state) if !state.finished => continue,
                         Phase::Deleting(state) => {
-                            let freed = state.freed;
-                            let errors = std::mem::take(&mut state.errors);
-                            return Ok(TuiResult::Completed { freed, errors });
+                            return Ok(state.take_result());
                         }
                         _ => return Ok(TuiResult::Cancelled),
                     }
@@ -175,6 +175,7 @@ fn run_loop(
                                     return Ok(TuiResult::Completed {
                                         freed: 0,
                                         errors: vec![],
+                                        targets: vec![],
                                     });
                                 }
                                 phase = Phase::Deleting(DeletingState::new(
@@ -195,9 +196,7 @@ fn run_loop(
                                 KeyCode::Enter | KeyCode::Char('q') | KeyCode::Esc
                             )
                         {
-                            let freed = state.freed;
-                            let errors = std::mem::take(&mut state.errors);
-                            return Ok(TuiResult::Completed { freed, errors });
+                            return Ok(state.take_result());
                         }
                         // Ignore all keys while deletion is in progress
                     }

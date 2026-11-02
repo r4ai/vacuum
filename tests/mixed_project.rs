@@ -130,3 +130,24 @@ fn nested_targets_are_deleted_without_errors() {
     assert!(!stderr.contains("Failed"), "stderr: {stderr}");
     assert!(!root.join("pkgs").exists());
 }
+
+#[test]
+fn auto_mode_reports_a_breakdown_by_adapter() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::make_file(&root.join("web").join("package.json"), b"{}");
+    common::make_file(&root.join("web").join("node_modules").join("a.js"), b"123");
+    common::make_file(&root.join("api").join("Cargo.toml"), b"[package]");
+    common::make_file(&root.join("api").join("target").join("app"), b"1234567");
+
+    let output = Command::new(common::vacuum_bin())
+        .arg(root)
+        .args(["--mode", "auto"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("cargo  1 item   7 B"), "{stdout}");
+    assert!(stdout.contains("node   1 item   3 B"), "{stdout}");
+}
