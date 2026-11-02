@@ -31,8 +31,8 @@ use adapter_select::{
 use delete_phase::{DeletingState, render_deleting};
 use scan_phase::{ScanningState, render_scanning};
 use target_select::{
-    App, handle_detail_key, handle_help_key, handle_normal_key, handle_search_key,
-    handle_visual_key, render,
+    App, handle_confirm_key, handle_detail_key, handle_help_key, handle_normal_key,
+    handle_search_key, handle_visual_key, render,
 };
 use types::{ActionResult, Mode};
 
@@ -165,6 +165,7 @@ fn run_loop(
                             }
                             Mode::Help => handle_help_key(app, key),
                             Mode::Detail => handle_detail_key(app, key),
+                            Mode::ConfirmDelete => handle_confirm_key(app, key),
                         };
                         match result {
                             ActionResult::Quit => return Ok(TuiResult::Cancelled),

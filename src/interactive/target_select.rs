@@ -350,7 +350,13 @@ impl App {
                     Mode::Help
                 }
             }
-            Action::Confirm => return ActionResult::Confirm,
+            Action::Confirm => {
+                // Ask first; with nothing selected there is nothing to ask.
+                if self.selected_count() == 0 {
+                    return ActionResult::Confirm;
+                }
+                self.mode = Mode::ConfirmDelete;
+            }
             Action::Quit => return ActionResult::Quit,
         }
         ActionResult::Continue
@@ -456,6 +462,48 @@ pub fn render(frame: &mut ratatui::Frame, app: &mut App) {
     if app.mode == Mode::Detail {
         render_detail_popup(frame, app, area);
     }
+    if app.mode == Mode::ConfirmDelete {
+        render_confirm_popup(frame, app, area);
+    }
+}
+
+/// Rows the confirmation popup needs: 3 lines of text plus 2 borders.
+const CONFIRM_POPUP_HEIGHT: u16 = 5;
+
+fn render_confirm_popup(frame: &mut ratatui::Frame, app: &App, area: Rect) {
+    // Keep every line visible on short terminals, within the screen.
+    let base = popup_area(area, 50, 20);
+    let height = base.height.max(CONFIRM_POPUP_HEIGHT).min(area.height);
+    let y = area.y + (area.height - height) / 2;
+    let popup = Rect::new(base.x, y, base.width, height);
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(" Confirm ")
+        .title_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let count = app.selected_count();
+    let noun = if count == 1 { "target" } else { "targets" };
+    let size = ByteSize(app.selected_size()).display().si();
+    let k = |s| Span::styled(s, Style::default().fg(Color::Yellow));
+    let lines = vec![
+        Line::from(Span::styled(
+            format!("Delete {count} {noun} ({size})?"),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
+        Line::raw(""),
+        Line::from(vec![
+            k("[y]"),
+            Span::raw(" Delete  "),
+            k("[n/Esc]"),
+            Span::raw(" Back"),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn render_header(frame: &mut ratatui::Frame, area: Rect) {
@@ -838,6 +886,18 @@ pub fn handle_mouse(app: &mut App, col: u16, row: u16, kind: MouseEventKind) {
     }
 }
 
+/// `y` deletes the selected targets; `n` or `Esc` goes back to selection.
+pub fn handle_confirm_key(app: &mut App, key: KeyEvent) -> ActionResult {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => ActionResult::Confirm,
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            app.mode = Mode::Normal;
+            ActionResult::Continue
+        }
+        _ => ActionResult::Continue,
+    }
+}
+
 pub fn handle_detail_key(app: &mut App, _key: KeyEvent) -> ActionResult {
     app.mode = Mode::Normal;
     ActionResult::Continue
@@ -846,7 +906,7 @@ pub fn handle_detail_key(app: &mut App, _key: KeyEvent) -> ActionResult {
 pub fn handle_normal_key(app: &mut App, key: KeyEvent) -> ActionResult {
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => ActionResult::Quit,
-        KeyCode::Enter => ActionResult::Confirm,
+        KeyCode::Enter => app.execute_action(Action::Confirm),
         KeyCode::Up | KeyCode::Char('k') => {
             app.move_up();
             ActionResult::Continue
@@ -1064,5 +1124,95 @@ pub fn handle_help_key(app: &mut App, key: KeyEvent) -> ActionResult {
             }
         }
         _ => ActionResult::Continue,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    fn app() -> App {
+        let targets = ["a", "b"]
+            .iter()
+            .map(|name| CleanTarget {
+                path: PathBuf::from("/root").join(name),
+                adapter: "node",
+                description: "test".into(),
+                size: 1500,
+            })
+            .collect();
+        App::new(targets, PathBuf::from("/root"))
+    }
+
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn screen(app: &mut App) -> String {
+        screen_of_height(app, 30)
+    }
+
+    fn screen_of_height(app: &mut App, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(100, height)).unwrap();
+        terminal.draw(|frame| render(frame, app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        buffer.content().iter().map(|cell| cell.symbol()).collect()
+    }
+
+    #[test]
+    fn enter_asks_for_confirmation_before_deleting() {
+        let mut app = app();
+        assert!(matches!(
+            handle_normal_key(&mut app, press(KeyCode::Enter)),
+            ActionResult::Continue
+        ));
+        assert!(app.mode == Mode::ConfirmDelete);
+        let screen = screen(&mut app);
+        assert!(screen.contains("Delete 2 targets (3.0 kB)?"), "{screen}");
+    }
+
+    #[test]
+    fn confirmation_keys_are_visible_on_a_short_terminal() {
+        let mut app = app();
+        handle_normal_key(&mut app, press(KeyCode::Enter));
+        let screen = screen_of_height(&mut app, 20);
+        assert!(screen.contains("Delete 2 targets"), "{screen}");
+        assert!(screen.contains("[y] Delete"), "{screen}");
+    }
+
+    #[test]
+    fn y_confirms_deletion() {
+        let mut app = app();
+        handle_normal_key(&mut app, press(KeyCode::Enter));
+        assert!(matches!(
+            handle_confirm_key(&mut app, press(KeyCode::Char('y'))),
+            ActionResult::Confirm
+        ));
+    }
+
+    #[test]
+    fn n_and_esc_return_to_selection() {
+        for code in [KeyCode::Char('n'), KeyCode::Esc] {
+            let mut app = app();
+            handle_normal_key(&mut app, press(KeyCode::Enter));
+            assert!(matches!(
+                handle_confirm_key(&mut app, press(code)),
+                ActionResult::Continue
+            ));
+            assert!(app.mode == Mode::Normal);
+        }
+    }
+
+    #[test]
+    fn enter_without_selection_skips_confirmation() {
+        let mut app = app();
+        app.select_none();
+        assert!(matches!(
+            handle_normal_key(&mut app, press(KeyCode::Enter)),
+            ActionResult::Confirm
+        ));
     }
 }

@@ -39,6 +39,8 @@ pub enum Mode {
     Search,
     Help,
     Detail,
+    /// Asking whether to delete the selected targets.
+    ConfirmDelete,
 }
 
 #[derive(Clone, Copy)]
