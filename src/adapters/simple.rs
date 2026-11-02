@@ -129,6 +129,17 @@ pub static DOTNET: SimpleAdapter = SimpleAdapter {
     }],
 };
 
+/// Swift Package Manager build output.
+pub static SWIFT: SimpleAdapter = SimpleAdapter {
+    name: "swift",
+    label: "SwiftPM build output",
+    rules: &[Rule {
+        dirs: &[".build"],
+        context: &["Package.swift"],
+        unless_inside: &[],
+    }],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

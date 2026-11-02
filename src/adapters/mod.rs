@@ -129,6 +129,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         kind: Kind::Entry(&simple::DOTNET),
     },
     AdapterSpec {
+        name: "swift",
+        label: "Swift Package Manager",
+        targets: ".build/",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::SWIFT),
+    },
+    AdapterSpec {
         name: GitignoreAdapter::NAME,
         label: "Gitignore",
         targets: ".gitignore-matched paths",
