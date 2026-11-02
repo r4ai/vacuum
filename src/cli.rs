@@ -62,6 +62,10 @@ pub struct Cli {
     #[arg(long)]
     pub one_file_system: bool,
 
+    /// Print the targets and the deletion result as JSON (auto mode only)
+    #[arg(long)]
+    pub json: bool,
+
     /// Skip size calculation to speed up scanning [default: off]
     #[arg(long, default_value_t = false, help_heading = "Performance")]
     pub no_size: bool,
