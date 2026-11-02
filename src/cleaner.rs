@@ -92,6 +92,35 @@ pub fn delete_with_progress(
 
 // ─── Classic indicatif-based deletion (used for auto mode) ───────────────────
 
+/// The outcome of removing targets.
+#[derive(Debug, Default)]
+pub struct DeleteReport {
+    /// Bytes of the targets removed.
+    pub freed: u64,
+    /// `(path, error)` for each target that could not be removed.
+    pub errors: Vec<(String, String)>,
+}
+
+/// Remove `targets` without printing anything. `after_each` runs after
+/// each target, removed or not.
+pub fn remove_all(
+    targets: &[CleanTarget],
+    method: DeleteMethod,
+    mut after_each: impl FnMut(&CleanTarget),
+) -> DeleteReport {
+    let mut report = DeleteReport::default();
+    for target in targets {
+        match remove(target, method) {
+            Ok(()) => report.freed += target.size,
+            Err(e) => report
+                .errors
+                .push((target.path.display().to_string(), format!("{e:#}"))),
+        }
+        after_each(target);
+    }
+    report
+}
+
 /// Delete the given targets, showing a progress bar.
 /// In dry-run mode, only prints what would be deleted.
 pub fn delete_targets(
@@ -125,20 +154,10 @@ pub fn delete_targets(
             .progress_chars("=>-"),
     );
 
-    let mut errors: Vec<(String, anyhow::Error)> = Vec::new();
-    let mut freed: u64 = 0;
-
-    for target in targets {
+    let DeleteReport { freed, errors } = remove_all(targets, method, |target| {
         pb.set_message(format!("{}", target.path.display()));
-
-        let result = remove(target, method);
-
-        match result {
-            Ok(()) => freed += target.size,
-            Err(e) => errors.push((target.path.display().to_string(), e)),
-        }
         pb.inc(1);
-    }
+    });
 
     pb.finish_with_message(format!(
         "Done. {} {}",

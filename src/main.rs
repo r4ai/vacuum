@@ -9,6 +9,7 @@ mod cli;
 mod display;
 mod exclude;
 mod interactive;
+mod report;
 mod roots;
 mod scanner;
 mod tracked;
@@ -38,6 +39,10 @@ fn run() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if cli.json && cli.mode != Mode::Auto {
+        anyhow::bail!("--json needs --mode auto");
+    }
+
     let roots = roots::Roots::resolve(&cli.paths)?;
 
     // Reject invalid exclude patterns before starting either mode.
@@ -58,6 +63,19 @@ fn run() -> anyhow::Result<()> {
         },
 
         // ── Auto mode: non-interactive scan + delete ─────────────────────────
+        Mode::Auto if cli.json => {
+            let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
+            let outcome = if cli.dry_run {
+                cleaner::DeleteReport::default()
+            } else {
+                cleaner::remove_all(&targets, cli.delete_method(), |_| {})
+            };
+            println!("{}", report::to_json(&targets, &outcome, cli.dry_run));
+            if !outcome.errors.is_empty() {
+                anyhow::bail!("failed to delete {} target(s)", outcome.errors.len());
+            }
+        }
+
         Mode::Auto => {
             if !scanner::ScanConfig::from(&cli).any_enabled() {
                 println!("All adapters are disabled. Nothing to do.");

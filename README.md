@@ -89,6 +89,25 @@ vacuum ~/projects --min-size 100MB
 - `--max-depth <N>`: スキャンルートから N 階層までしか走査しない。ルート直下が 1 階層目。
 - `--one-file-system`: 別のファイルシステム（マウントポイント）に入らない。ネットワークドライブや外部ディスクを誤って走査するのを防ぐ。
 
+### JSON で出力する
+
+auto モードで `--json` を付けると、候補と削除結果を JSON で標準出力に出す。`jq` での集計や、ほかのツールとの連携に使う。
+
+```sh
+vacuum ~/projects --mode auto --dry-run --json | jq '.total_size'
+```
+
+```json
+{
+  "targets": [
+    { "path": "/home/u/projects/app/node_modules", "adapter": "node",
+      "description": "Node.js dependencies (node_modules/)", "size": 1234, "tracked": false }
+  ],
+  "total_size": 1234,
+  "result": { "dry_run": true, "freed": 0, "errors": [] }
+}
+```
+
 ### 終了コード
 
 削除に 1 件でも失敗すると、終了コード 1 で終わる。スクリプトや CI から失敗を検知できる。
