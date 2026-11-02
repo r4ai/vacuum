@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::adapter::{Adapter, CleanTarget, Context, DirStats, WalkLimits, dir_stats};
+use crate::adapter::{Adapter, CleanTarget, Context, DirStats, WalkLimits, device_of, dir_stats};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::age::AgeIndex;
 use crate::cli::Cli;
@@ -242,6 +242,11 @@ fn walk_parallel(
 ) {
     let excludes = &filters.excludes;
     let one_file_system = filters.limits.one_file_system;
+    let root_device = if one_file_system {
+        device_of(root)
+    } else {
+        None
+    };
     WalkBuilder::new(root)
         .standard_filters(false)
         .follow_links(false)
@@ -255,7 +260,8 @@ fn walk_parallel(
                 let Ok(entry) = entry else {
                     return WalkState::Continue;
                 };
-                let (state, found) = judge(&entry, adapters, ignored, excludes, &mut ctx);
+                let (state, found) =
+                    judge(&entry, adapters, ignored, excludes, root_device, &mut ctx);
                 let found = match found {
                     Some(Found::Unsized(mut target)) => {
                         // Directory walks run as rayon tasks, off the walk.
@@ -288,12 +294,18 @@ fn judge(
     adapters: &[&dyn Adapter],
     ignored: &HashSet<PathBuf>,
     excludes: &Excludes,
+    root_device: Option<u64>,
     ctx: &mut Context,
 ) -> (WalkState, Option<Found>) {
     let path = entry.path();
     let (Some(parent), Some(file_type)) = (path.parent(), entry.file_type()) else {
         return (WalkState::Continue, None);
     };
+    // With `--one-file-system`, a mount point is yielded but must be
+    // neither a target nor walked into.
+    if root_device.is_some() && file_type.is_dir() && device_of(path) != root_device {
+        return (WalkState::Skip, None);
+    }
     if excludes.is_excluded(path, file_type.is_dir()) {
         // Neither a target nor walked into.
         return (WalkState::Skip, None);
