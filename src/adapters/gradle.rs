@@ -13,9 +13,10 @@ impl Adapter for GradleAdapter {
     }
 
     fn match_dir(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String> {
-        let has_context = GRADLE_CONTEXT_FILES.iter().any(|f| ctx.has_file(parent, f));
-        (GRADLE_TARGETS.contains(&name) && has_context)
-            .then(|| format!("Gradle build artifact ({name}/)"))
+        // Check the name first so that unrelated directories cost no I/O.
+        (GRADLE_TARGETS.contains(&name)
+            && GRADLE_CONTEXT_FILES.iter().any(|f| ctx.has_file(parent, f)))
+        .then(|| format!("Gradle build artifact ({name}/)"))
     }
 }
 
