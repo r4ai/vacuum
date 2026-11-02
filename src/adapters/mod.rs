@@ -153,6 +153,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         kind: Kind::Entry(&simple::ELIXIR),
     },
     AdapterSpec {
+        name: "zig",
+        label: "Zig",
+        targets: ".zig-cache/, zig-cache/, zig-out/",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::ZIG),
+    },
+    AdapterSpec {
         name: GitignoreAdapter::NAME,
         label: "Gitignore",
         targets: ".gitignore-matched paths",
