@@ -190,6 +190,7 @@ gitignore = false
 | `--dart` | `.dart_tool/`, `build/` | on |
 | `--php` | `vendor/`（`composer.json` と同じ階層） | on |
 | `--ruby` | `vendor/bundle/` | on |
+| `--scala` | `target/`, `project/target/` | on |
 | `--gitignore` | `.gitignore` にマッチするファイルすべて        | **off**（危険） |
 
 コンテキストファイル（`package.json`, `Cargo.toml` 等）が存在するディレクトリのみを対象とする。誤検知を防ぐためのガードとして機能する。
