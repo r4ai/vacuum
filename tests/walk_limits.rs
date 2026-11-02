@@ -1,7 +1,6 @@
 mod common;
 
 use std::path::Path;
-use std::process::Command;
 use tempfile::TempDir;
 
 /// `node_modules/` at depth 1 (root project) and depth 2 (`sub` project).
@@ -13,7 +12,7 @@ fn setup(root: &Path) {
 }
 
 fn vacuum(root: &Path, args: &[&str]) {
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .args(args)

@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -14,7 +13,7 @@ fn auto_mode_deletes_build_dir() {
         b"\x00",
     );
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
@@ -34,7 +33,7 @@ fn build_dir_without_dune_project_not_deleted() {
     let root = dir.path();
     common::make_dir(&root.join("_build"));
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
@@ -54,7 +53,7 @@ fn ocaml_flag_false_skips_build_dir() {
     common::make_file(&root.join("dune-project"), b"(lang dune 3.0)");
     common::make_dir(&root.join("_build"));
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--ocaml=false"])
         .status()
@@ -75,7 +74,7 @@ fn auto_mode_deletes_opam_switch_dir() {
     common::make_dir(&root.join("_opam").join("lib"));
     common::make_file(&root.join("_opam").join("lib").join("x"), b"1");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
@@ -91,7 +90,7 @@ fn opam_switch_dir_without_ocaml_context_not_deleted() {
     let root = dir.path();
     common::make_dir(&root.join("_opam"));
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()

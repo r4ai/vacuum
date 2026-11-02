@@ -12,7 +12,7 @@ fn gitignore_adapter_deletes_matched_files() {
     common::make_file(&root.join("app.log"), b"log content");
     common::make_file(&root.join("app.py"), b"# not ignored");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args([
             "--mode",
@@ -65,11 +65,7 @@ fn setup_repo_with_worktree(root: &Path, gitignore: &str, worktree_rel: &str) ->
 }
 
 fn run_vacuum(root: &Path, args: &[&str]) {
-    let status = Command::new(common::vacuum_bin())
-        .arg(root)
-        .args(args)
-        .status()
-        .unwrap();
+    let status = common::vacuum().arg(root).args(args).status().unwrap();
     assert!(status.success());
 }
 
@@ -173,7 +169,7 @@ fn gitignore_adapter_keeps_whitelisted_file_inside_ignored_dir() {
     common::make_file(&root.join("build").join("keep.txt"), b"keep");
     common::make_file(&root.join("build").join("out.o"), b"obj");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(GITIGNORE_ONLY)
         .status()
@@ -198,7 +194,7 @@ fn gitignore_adapter_keeps_whitelisted_file_with_star_pattern() {
     common::make_file(&root.join("build").join("keep.txt"), b"keep");
     common::make_file(&root.join("build").join("out.o"), b"obj");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(GITIGNORE_ONLY)
         .status()
@@ -218,7 +214,7 @@ fn gitignore_adapter_keeps_whitelisted_file_in_nested_ignored_dir() {
     common::make_file(&root.join("build").join("sub").join("out.o"), b"obj");
     common::make_file(&root.join("build").join("other").join("a.o"), b"obj");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(GITIGNORE_ONLY)
         .status()
