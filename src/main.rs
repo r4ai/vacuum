@@ -10,6 +10,7 @@ mod display;
 mod exclude;
 mod interactive;
 mod scanner;
+mod tracked;
 
 use cli::{Cli, Mode};
 use interactive::TuiResult;
@@ -54,7 +55,7 @@ fn run() -> anyhow::Result<()> {
         Mode::Safe => match interactive::run_tui_flow(&root, &cli)? {
             TuiResult::Cancelled => display::print_cancelled(),
             TuiResult::Completed { freed, errors } => {
-                display::print_final_report(freed, &errors, cli.dry_run);
+                display::print_final_report(freed, &errors, cli.dry_run, cli.delete_method());
                 if !errors.is_empty() {
                     anyhow::bail!("failed to delete {} target(s)", errors.len());
                 }
@@ -78,7 +79,7 @@ fn run() -> anyhow::Result<()> {
             }
 
             let dry_run = cli.dry_run;
-            cleaner::delete_targets(&targets, dry_run)?;
+            cleaner::delete_targets(&targets, dry_run, cli.delete_method())?;
         }
     }
 

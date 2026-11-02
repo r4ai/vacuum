@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::adapters::REGISTRY;
+use crate::cleaner::DeleteMethod;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -36,6 +37,14 @@ pub struct Cli {
     #[arg(long, value_name = "GLOB")]
     pub exclude: Vec<String>,
 
+    /// Also list targets that contain files tracked by git [default: off]
+    #[arg(long)]
+    pub include_tracked: bool,
+
+    /// Move targets to the OS trash instead of deleting them permanently
+    #[arg(long)]
+    pub trash: bool,
+
     /// Skip size calculation to speed up scanning [default: off]
     #[arg(long, default_value_t = false, help_heading = "Performance")]
     pub no_size: bool,
@@ -46,6 +55,16 @@ pub struct Cli {
 
     #[command(flatten)]
     pub adapters: AdapterFlags,
+}
+
+impl Cli {
+    pub fn delete_method(&self) -> DeleteMethod {
+        if self.trash {
+            DeleteMethod::Trash
+        } else {
+            DeleteMethod::Remove
+        }
+    }
 }
 
 /// The adapter flags (`--node`, `--gitignore=false`, ...), generated from

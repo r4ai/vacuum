@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 
 use crate::adapter::CleanTarget;
-use crate::cleaner::{DeleteMsg, delete_with_progress};
+use crate::cleaner::{DeleteMethod, DeleteMsg, delete_with_progress};
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -22,15 +22,16 @@ pub struct DeletingState {
     pub finished: bool,
     pub start: Instant,
     pub dry_run: bool,
+    pub method: DeleteMethod,
 }
 
 impl DeletingState {
     /// Spawn background delete thread and return the state.
-    pub fn new(targets: Vec<CleanTarget>, dry_run: bool) -> Self {
+    pub fn new(targets: Vec<CleanTarget>, dry_run: bool, method: DeleteMethod) -> Self {
         let total = targets.len();
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            delete_with_progress(targets, dry_run, tx);
+            delete_with_progress(targets, dry_run, method, tx);
         });
         Self {
             rx,
@@ -42,6 +43,7 @@ impl DeletingState {
             finished: false,
             start: Instant::now(),
             dry_run,
+            method,
         }
     }
 
@@ -155,7 +157,7 @@ fn render_delete_body(frame: &mut ratatui::Frame, state: &DeletingState, area: R
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw(format!("  freed: {freed_str}")),
+            Span::raw(format!("  {}: {freed_str}", state.method.done_label())),
             if state.errors.is_empty() {
                 Span::raw(String::new())
             } else {
@@ -167,7 +169,11 @@ fn render_delete_body(frame: &mut ratatui::Frame, state: &DeletingState, area: R
         ])
     } else {
         Line::from(vec![
-            Span::raw(format!("  {:.1}s  freed: {freed_str}", elapsed)),
+            Span::raw(format!(
+                "  {:.1}s  {}: {freed_str}",
+                elapsed,
+                state.method.done_label()
+            )),
             if !state.errors.is_empty() {
                 Span::styled(
                     format!("  {} error(s)", state.errors.len()),
