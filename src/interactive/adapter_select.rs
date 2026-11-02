@@ -228,6 +228,7 @@ mod tests {
     fn scan_config(node: bool, gitignore: bool) -> ScanConfig {
         let mut cfg = ScanConfig {
             no_size: false,
+            exclude: Vec::new(),
             include_tracked: false,
             enabled: ["cargo", "python", "go", "gradle", "maven", "ocaml"]
                 .into_iter()

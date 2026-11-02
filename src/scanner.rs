@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use crate::adapter::{Adapter, CleanTarget, Context, dir_stats};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::cli::Cli;
+use crate::exclude::Excludes;
 use crate::tracked::TrackedIndex;
 
 /// Scanner settings extracted from CLI flags.
@@ -13,6 +14,8 @@ use crate::tracked::TrackedIndex;
 #[derive(Clone, Debug)]
 pub struct ScanConfig {
     pub no_size: bool,
+    /// Extra gitignore-style patterns to exclude (`--exclude`).
+    pub exclude: Vec<String>,
     /// Whether to keep targets that contain files tracked by git.
     pub include_tracked: bool,
     /// Names of the enabled adapters (see [`REGISTRY`]).
@@ -23,6 +26,7 @@ impl From<&Cli> for ScanConfig {
     fn from(cli: &Cli) -> Self {
         Self {
             no_size: cli.no_size,
+            exclude: cli.exclude.clone(),
             include_tracked: cli.include_tracked,
             enabled: cli.adapters.enabled.clone(),
         }
@@ -80,7 +84,10 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
 #[cfg(test)]
 pub fn scan_with(adapter: impl Adapter, root: &Path) -> Vec<CleanTarget> {
     let mut all: Vec<CleanTarget> = Vec::new();
-    walk(root, &[&adapter], false, false, true, &mut |t| all.push(t));
+    let excludes = Excludes::none();
+    walk(root, &[&adapter], false, false, true, &excludes, &mut |t| {
+        all.push(t)
+    });
     all.sort_by(|a, b| a.path.cmp(&b.path));
     all
 }
@@ -93,12 +100,14 @@ pub fn scan_streaming(
     cfg: &ScanConfig,
     on_found: &mut dyn FnMut(CleanTarget),
 ) -> anyhow::Result<()> {
+    let excludes = Excludes::new(root, &cfg.exclude)?;
     walk(
         root,
         &cfg.entry_adapters(),
         cfg.gitignore_enabled(),
         cfg.no_size,
         cfg.include_tracked,
+        &excludes,
         on_found,
     );
     Ok(())
@@ -111,6 +120,7 @@ fn walk(
     gitignore: bool,
     no_size: bool,
     include_tracked: bool,
+    excludes: &Excludes,
     on_found: &mut dyn FnMut(CleanTarget),
 ) {
     let mut out = Emitter {
@@ -118,13 +128,14 @@ fn walk(
         no_size,
         include_tracked,
         tracked: TrackedIndex::default(),
+        excludes,
         on_found,
     };
 
     if adapters.is_empty() {
         // Only gitignore can be enabled — no need for a second walk.
         if gitignore {
-            for target in scan_gitignore(root) {
+            for target in scan_gitignore(root, excludes) {
                 out.emit(target, None);
             }
         }
@@ -137,7 +148,7 @@ fn walk(
     let mut ignored: HashMap<PathBuf, CleanTarget> = HashMap::new();
     if gitignore {
         ignored.extend(
-            scan_gitignore(root)
+            scan_gitignore(root, excludes)
                 .into_iter()
                 .map(|t| (t.path.clone(), t)),
         );
@@ -151,7 +162,9 @@ fn walk(
         scope.spawn(|| {
             // Directory sizes are computed as rayon tasks, so the walk never
             // waits for them. The scope ends once every size is known.
-            rayon::scope(|sizes| walk_parallel(root, adapters, &ignored_paths, no_size, sizes, tx))
+            rayon::scope(|sizes| {
+                walk_parallel(root, adapters, &ignored_paths, no_size, excludes, sizes, tx)
+            })
         });
         for found in rx {
             match found {
@@ -196,6 +209,7 @@ fn walk_parallel(
     adapters: &[&dyn Adapter],
     ignored: &HashSet<PathBuf>,
     no_size: bool,
+    excludes: &Excludes,
     sizes: &rayon::Scope<'_>,
     tx: mpsc::Sender<Found>,
 ) {
@@ -210,7 +224,7 @@ fn walk_parallel(
                 let Ok(entry) = entry else {
                     return WalkState::Continue;
                 };
-                let (state, found) = judge(&entry, adapters, ignored, &mut ctx);
+                let (state, found) = judge(&entry, adapters, ignored, excludes, &mut ctx);
                 let found = match found {
                     Some(Found::Unsized(mut target)) => {
                         // Directory walks run as rayon tasks, off the walk.
@@ -242,12 +256,17 @@ fn judge(
     entry: &DirEntry,
     adapters: &[&dyn Adapter],
     ignored: &HashSet<PathBuf>,
+    excludes: &Excludes,
     ctx: &mut Context,
 ) -> (WalkState, Option<Found>) {
     let path = entry.path();
     let (Some(parent), Some(file_type)) = (path.parent(), entry.file_type()) else {
         return (WalkState::Continue, None);
     };
+    if excludes.is_excluded(path, file_type.is_dir()) {
+        // Neither a target nor walked into.
+        return (WalkState::Skip, None);
+    }
     let name = entry.file_name().to_string_lossy();
 
     let matched = if file_type.is_dir() {
@@ -297,14 +316,24 @@ struct Emitter<'a> {
     no_size: bool,
     include_tracked: bool,
     tracked: TrackedIndex,
+    excludes: &'a Excludes,
     on_found: &'a mut dyn FnMut(CleanTarget),
 }
 
 impl Emitter<'_> {
-    /// Report `target`, unless it was reported already or it contains
-    /// tracked files that are not wanted.
+    /// Report `target`, unless it was reported already, is excluded, or
+    /// contains tracked files that are not wanted. The checks here also
+    /// cover gitignore matches.
     /// `nested` are the repository roots at or below the target, if known.
     fn emit(&mut self, mut target: CleanTarget, nested: Option<Vec<PathBuf>>) {
+        // A directory is deleted as a whole, so it must not hold an
+        // excluded path either.
+        let is_dir = target.path.is_dir();
+        if self.excludes.is_excluded(&target.path, is_dir)
+            || (is_dir && self.excludes.contains_excluded(&target.path))
+        {
+            return;
+        }
         target.tracked = self.tracked.is_tracked(&target.path, nested.as_deref());
         if target.tracked && !self.include_tracked {
             return;
@@ -324,11 +353,15 @@ impl Emitter<'_> {
 }
 
 /// Run the gitignore adapter, reporting a failure as a warning.
-fn scan_gitignore(root: &Path) -> Vec<CleanTarget> {
-    GitignoreAdapter.scan(root).unwrap_or_else(|e| {
-        eprintln!("Warning: adapter '{}' failed: {e}", GitignoreAdapter::NAME);
-        Vec::new()
-    })
+/// Excluded paths are not walked.
+fn scan_gitignore(root: &Path, excludes: &Excludes) -> Vec<CleanTarget> {
+    let excluded = |path: &Path, is_dir| excludes.is_excluded(path, is_dir);
+    GitignoreAdapter
+        .scan_except(root, &excluded)
+        .unwrap_or_else(|e| {
+            eprintln!("Warning: adapter '{}' failed: {e}", GitignoreAdapter::NAME);
+            Vec::new()
+        })
 }
 
 #[cfg(test)]

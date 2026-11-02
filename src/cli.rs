@@ -32,6 +32,11 @@ pub struct Cli {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Exclude paths matching GLOB (gitignore syntax, relative to PATH).
+    /// Can be given more than once. `PATH/.vacuumignore` is also read.
+    #[arg(long, value_name = "GLOB")]
+    pub exclude: Vec<String>,
+
     /// Also list targets that contain files tracked by git [default: off]
     #[arg(long)]
     pub include_tracked: bool,
