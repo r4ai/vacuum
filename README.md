@@ -191,6 +191,7 @@ gitignore = false
 | `--php` | `vendor/`（`composer.json` と同じ階層） | on |
 | `--ruby` | `vendor/bundle/` | on |
 | `--scala` | `target/`, `project/target/` | on |
+| `--terraform` | `.terraform/`（中に `terraform.tfstate` があれば残す） | on |
 | `--gitignore` | `.gitignore` にマッチするファイルすべて        | **off**（危険） |
 
 コンテキストファイル（`package.json`, `Cargo.toml` 等）が存在するディレクトリのみを対象とする。誤検知を防ぐためのガードとして機能する。

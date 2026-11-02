@@ -227,6 +227,17 @@ pub static SCALA: SimpleAdapter = SimpleAdapter {
     }],
 };
 
+/// Terraform providers and modules. Kept when it holds state.
+pub static TERRAFORM: SimpleAdapter = SimpleAdapter {
+    name: "terraform",
+    label: "Terraform cache",
+    rules: &[Rule {
+        dirs: &[".terraform"],
+        context: &["*.tf"],
+        unless_inside: &["terraform.tfstate"],
+    }],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

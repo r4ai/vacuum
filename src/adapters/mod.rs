@@ -193,6 +193,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         kind: Kind::Entry(&simple::SCALA),
     },
     AdapterSpec {
+        name: "terraform",
+        label: "Terraform",
+        targets: ".terraform/ (kept if it holds terraform.tfstate)",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::TERRAFORM),
+    },
+    AdapterSpec {
         name: GitignoreAdapter::NAME,
         label: "Gitignore",
         targets: ".gitignore-matched paths",
