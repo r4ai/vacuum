@@ -2,7 +2,6 @@ mod common;
 
 use std::fs::File;
 use std::path::Path;
-use std::process::Command;
 use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
@@ -45,7 +44,7 @@ fn setup(root: &Path) {
 }
 
 fn vacuum(root: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(common::vacuum_bin())
+    common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .args(args)
