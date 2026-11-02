@@ -50,6 +50,10 @@ pub struct Cli {
     #[arg(long, value_name = "DURATION", value_parser = crate::age::parse_duration)]
     pub older_than: Option<std::time::Duration>,
 
+    /// Only list targets of at least SIZE (e.g. 100MB, 1GiB)
+    #[arg(long, value_name = "SIZE", conflicts_with = "no_size")]
+    pub min_size: Option<bytesize::ByteSize>,
+
     /// Skip size calculation to speed up scanning [default: off]
     #[arg(long, default_value_t = false, help_heading = "Performance")]
     pub no_size: bool,

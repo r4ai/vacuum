@@ -18,6 +18,8 @@ pub struct ScanConfig {
     pub no_size: bool,
     /// Only keep targets whose project is older than this (`--older-than`).
     pub older_than: Option<Duration>,
+    /// Only keep targets of at least this many bytes (`--min-size`).
+    pub min_size: Option<u64>,
     /// Extra gitignore-style patterns to exclude (`--exclude`).
     pub exclude: Vec<String>,
     /// Whether to keep targets that contain files tracked by git.
@@ -32,6 +34,7 @@ impl From<&Cli> for ScanConfig {
             no_size: cli.no_size,
             exclude: cli.exclude.clone(),
             older_than: cli.older_than,
+            min_size: cli.min_size.map(|s| s.as_u64()),
             include_tracked: cli.include_tracked,
             enabled: cli.adapters.enabled.clone(),
         }
@@ -93,6 +96,7 @@ pub fn scan_with(adapter: impl Adapter, root: &Path) -> Vec<CleanTarget> {
         excludes: Excludes::none(),
         include_tracked: true,
         older_than: None,
+        min_size: None,
     };
     walk(root, &[&adapter], false, false, &filters, &mut |t| {
         all.push(t)
@@ -113,6 +117,7 @@ pub fn scan_streaming(
         excludes: Excludes::new(root, &cfg.exclude)?,
         include_tracked: cfg.include_tracked,
         older_than: cfg.older_than,
+        min_size: cfg.min_size,
     };
     walk(
         root,
@@ -329,6 +334,8 @@ struct Filters {
     include_tracked: bool,
     /// Only keep targets whose project is older than this.
     older_than: Option<Duration>,
+    /// Only keep targets of at least this many bytes.
+    min_size: Option<u64>,
 }
 
 struct Emitter<'a> {
@@ -351,6 +358,9 @@ impl Emitter<'_> {
         if self.filters.excludes.is_excluded(&target.path, is_dir)
             || (is_dir && self.filters.excludes.contains_excluded(&target.path))
         {
+            return;
+        }
+        if self.filters.min_size.is_some_and(|min| target.size < min) {
             return;
         }
         if let Some(older_than) = self.filters.older_than

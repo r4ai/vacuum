@@ -230,6 +230,7 @@ mod tests {
             no_size: false,
             exclude: Vec::new(),
             older_than: None,
+            min_size: None,
             include_tracked: false,
             enabled: ["cargo", "python", "go", "gradle", "maven", "ocaml"]
                 .into_iter()
