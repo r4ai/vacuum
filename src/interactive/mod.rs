@@ -3,8 +3,8 @@ use std::path::Path;
 
 use anyhow::Context as _;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
-    MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -116,6 +116,21 @@ fn run_loop(
             }
 
             Event::Key(key) if key.kind == KeyEventKind::Press => {
+                // Raw mode turns Ctrl+C into a key event instead of SIGINT.
+                // Treat it as cancel in every phase. While deletion is in
+                // progress it is ignored, like every other key.
+                if is_interrupt(key) {
+                    match &mut phase {
+                        Phase::Deleting(state) if !state.finished => continue,
+                        Phase::Deleting(state) => {
+                            let freed = state.freed;
+                            let errors = std::mem::take(&mut state.errors);
+                            return Ok(TuiResult::Completed { freed, errors });
+                        }
+                        _ => return Ok(TuiResult::Cancelled),
+                    }
+                }
+
                 match &mut phase {
                     // ── Adapter selection ─────────────────────────────────
                     Phase::AdapterSelection(state) => {
@@ -187,6 +202,11 @@ fn run_loop(
     }
 }
 
+/// Whether `key` is Ctrl+C.
+fn is_interrupt(key: KeyEvent) -> bool {
+    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
 // ─── Public entry point ───────────────────────────────────────────────────────
 
 /// Run the full safe-mode TUI workflow:
@@ -219,4 +239,21 @@ pub fn run_tui_flow(root: &Path, cli: &Cli) -> anyhow::Result<TuiResult> {
     let _ = terminal.show_cursor();
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_c_is_an_interrupt() {
+        let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert!(is_interrupt(key));
+    }
+
+    #[test]
+    fn plain_c_is_not_an_interrupt() {
+        let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE);
+        assert!(!is_interrupt(key));
+    }
 }
