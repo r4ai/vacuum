@@ -39,8 +39,8 @@ fn run() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if cli.json && cli.mode != Mode::Auto {
-        anyhow::bail!("--json needs --mode auto");
+    if cli.json && cli.mode == Mode::Safe {
+        anyhow::bail!("--json needs --mode list or --mode auto");
     }
 
     let roots = roots::Roots::resolve(&cli.paths)?;
@@ -62,23 +62,31 @@ fn run() -> anyhow::Result<()> {
             }
         },
 
-        // ── Auto mode: non-interactive scan + delete ─────────────────────────
-        Mode::Auto if cli.json => {
+        // ── JSON output: list mode or auto mode ──────────────────────────────
+        Mode::List | Mode::Auto if cli.json => {
             let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
-            let outcome = if cli.dry_run {
+            let dry_run = cli.dry_run || cli.mode == Mode::List;
+            let outcome = if dry_run {
                 cleaner::DeleteReport::default()
             } else {
                 cleaner::remove_all(&targets, cli.delete_method(), |_| {})
             };
             println!(
                 "{}",
-                report::to_json(&targets, &outcome, cli.dry_run, cli.delete_method())
+                report::to_json(&targets, &outcome, dry_run, cli.delete_method())
             );
             if !outcome.errors.is_empty() {
                 anyhow::bail!("failed to delete {} target(s)", outcome.errors.len());
             }
         }
 
+        // ── List mode: print the targets, never delete ───────────────────────
+        Mode::List => {
+            let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
+            display::print_targets(&targets, &roots.base);
+        }
+
+        // ── Auto mode: non-interactive scan + delete ─────────────────────────
         Mode::Auto => {
             if !scanner::ScanConfig::from(&cli).any_enabled() {
                 println!("All adapters are disabled. Nothing to do.");
