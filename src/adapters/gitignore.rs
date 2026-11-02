@@ -6,6 +6,21 @@ use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
 
 pub struct GitignoreAdapter;
 
+/// Whether `dir` is the root of a Git working tree (main repo, worktree, or submodule).
+fn is_git_root(dir: &Path) -> bool {
+    dir.join(".git").exists()
+}
+
+/// Whether any descendant of `dir` is the root of a Git working tree.
+fn contains_git_root(dir: &Path) -> bool {
+    WalkDir::new(dir)
+        .min_depth(1)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .any(|e| e.file_name() == ".git")
+}
+
 impl Adapter for GitignoreAdapter {
     fn name(&self) -> &'static str {
         "gitignore"
@@ -41,15 +56,33 @@ impl Adapter for GitignoreAdapter {
                 continue;
             }
 
+            let is_dir = entry.file_type().is_dir();
+
+            // A nested worktree, submodule, or repository has its own `.git`
+            // (a file for worktrees and submodules, a directory otherwise).
+            // Never delete it as a whole; apply its own `.gitignore` instead.
+            if is_dir && is_git_root(path) {
+                targets.extend(self.scan(path)?);
+                iter.skip_current_dir();
+                continue;
+            }
+
             let relative = match path.strip_prefix(root) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
 
-            let is_dir = entry.file_type().is_dir();
-            let matched = gitignore.matched(relative, is_dir);
+            // Descendants of a directory we walked into (see below) must still
+            // honor patterns that matched an ancestor, e.g. `.worktrees/`.
+            let matched = gitignore.matched_path_or_any_parents(relative, is_dir);
 
             if matched.is_ignore() {
+                // An ignored directory may hold a worktree or repository,
+                // e.g. `.claude/worktrees/<name>`. Walk into it instead.
+                if is_dir && contains_git_root(path) {
+                    continue;
+                }
+
                 let size = if is_dir {
                     compute_dir_size(path)
                 } else {
@@ -136,6 +169,46 @@ mod tests {
             .collect();
         assert_eq!(build_related.len(), 1);
         assert_eq!(build_related[0].path, dir.path().join("build"));
+    }
+
+    #[test]
+    fn nested_worktree_not_matched_by_parent_gitignore() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), ".worktrees/\n").unwrap();
+        let worktree = dir.path().join(".worktrees").join("feature");
+        fs::create_dir_all(&worktree).unwrap();
+        // A worktree has a `.git` file instead of a `.git` directory.
+        fs::write(worktree.join(".git"), "gitdir: /somewhere\n").unwrap();
+        fs::write(worktree.join("main.rs"), "").unwrap();
+
+        let targets = GitignoreAdapter.scan(dir.path()).unwrap();
+        assert!(targets.is_empty(), "unexpected targets: {targets:?}");
+    }
+
+    #[test]
+    fn nested_worktree_uses_its_own_gitignore() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), ".worktrees/\n").unwrap();
+        let worktree = dir.path().join(".worktrees").join("feature");
+        fs::create_dir_all(worktree.join("dist")).unwrap();
+        fs::write(worktree.join(".git"), "gitdir: /somewhere\n").unwrap();
+        fs::write(worktree.join(".gitignore"), "dist/\n").unwrap();
+
+        let targets = GitignoreAdapter.scan(dir.path()).unwrap();
+        let paths: Vec<_> = targets.iter().map(|t| t.path.clone()).collect();
+        assert_eq!(paths, vec![worktree.join("dist")]);
+    }
+
+    #[test]
+    fn nested_repository_not_matched_by_parent_gitignore() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), "vendor/\n").unwrap();
+        let nested = dir.path().join("vendor").join("lib");
+        fs::create_dir_all(nested.join(".git")).unwrap();
+        fs::write(nested.join("lib.rs"), "").unwrap();
+
+        let targets = GitignoreAdapter.scan(dir.path()).unwrap();
+        assert!(targets.is_empty(), "unexpected targets: {targets:?}");
     }
 
     #[test]
