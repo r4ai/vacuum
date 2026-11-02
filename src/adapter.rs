@@ -141,15 +141,16 @@ pub fn dir_stats(path: &Path, with_size: bool, one_file_system: bool) -> DirStat
     dir_stats_on(path, with_size, device)
 }
 
-/// The device a path lives on, where the platform tells.
+/// The device a path lives on, where the platform tells. Symlinks are
+/// not followed.
 #[cfg(unix)]
-fn device_of(path: &Path) -> Option<u64> {
+pub fn device_of(path: &Path) -> Option<u64> {
     use std::os::unix::fs::MetadataExt;
     std::fs::symlink_metadata(path).ok().map(|m| m.dev())
 }
 
 #[cfg(not(unix))]
-fn device_of(_path: &Path) -> Option<u64> {
+pub fn device_of(_path: &Path) -> Option<u64> {
     None
 }
 
