@@ -1,6 +1,7 @@
 //! When a project was last worked on (`--older-than`).
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 /// Parse a duration such as `30d`, `12h` or `2w`.
@@ -18,49 +19,101 @@ pub fn parse_duration(text: &str) -> Result<Duration, String> {
         "w" => 24 * 7,
         _ => return Err(format!("unknown unit {unit:?} (use h, d or w)")),
     };
-    Ok(Duration::from_secs(number * hours * 60 * 60))
+    number
+        .checked_mul(hours * 60 * 60)
+        .map(Duration::from_secs)
+        .ok_or_else(|| format!("{text:?} is too long"))
 }
 
-/// The newest modification time of a file in the project that holds
-/// `target`, i.e. under the target's parent directory. The target itself
-/// is skipped, since a build refreshes it without any change to the
-/// project. `None` when the project holds no other file.
-pub fn project_last_modified(target: &Path) -> Option<SystemTime> {
-    let project = target.parent()?;
-    let mut newest = None;
-    let mut walk = walkdir::WalkDir::new(project)
-        .follow_links(false)
-        .into_iter();
-    while let Some(entry) = walk.next() {
-        let Ok(entry) = entry else {
-            continue;
-        };
-        if entry.path() == target {
-            // Skip a directory target's contents; a file target has none.
-            // (On a file, `skip_current_dir` would skip its siblings.)
-            if entry.file_type().is_dir() {
-                walk.skip_current_dir();
+/// Answers when the project that holds a target last changed.
+///
+/// A target's project is its parent directory. The project changed when
+/// any file under it changed, except files in the target itself: a build
+/// refreshes the target without any change to the project.
+///
+/// Each project is walked once. For every direct child of the project
+/// (a target is always one), the index keeps the newest file time in
+/// that child. Keeping the two newest children answers "newest except
+/// this target" for any target in O(1).
+#[derive(Default)]
+pub struct AgeIndex {
+    projects: HashMap<PathBuf, Newest>,
+}
+
+/// The two newest direct children of a project.
+#[derive(Default)]
+struct Newest {
+    first: Option<(PathBuf, SystemTime)>,
+    second: Option<SystemTime>,
+}
+
+impl Newest {
+    fn add(&mut self, child: PathBuf, time: SystemTime) {
+        match &self.first {
+            Some((_, first)) if time <= *first => {
+                self.second = self.second.max(Some(time));
             }
-            continue;
+            _ => {
+                self.second = self.first.take().map(|(_, t)| t).max(self.second);
+                self.first = Some((child, time));
+            }
         }
-        if entry.file_type().is_file()
-            && let Some(modified) = entry.metadata().ok().and_then(|m| m.modified().ok())
-        {
-            newest = newest.max(Some(modified));
+    }
+
+    /// The newest time among the children other than `excluded`.
+    fn excluding(&self, excluded: &Path) -> Option<SystemTime> {
+        match &self.first {
+            Some((child, _)) if child == excluded => self.second,
+            Some((_, time)) => Some(*time),
+            None => None,
+        }
+    }
+}
+
+impl AgeIndex {
+    /// When the project holding `target` last changed; `None` when the
+    /// project holds no file outside the target.
+    pub fn last_modified(&mut self, target: &Path) -> Option<SystemTime> {
+        let project = target.parent()?;
+        self.projects
+            .entry(project.to_path_buf())
+            .or_insert_with_key(|project| scan_project(project))
+            .excluding(target)
+    }
+
+    /// Whether the project holding `target` last changed more than
+    /// `older_than` ago. A project with no other file counts as old.
+    pub fn is_older_than(&mut self, target: &Path, older_than: Duration) -> bool {
+        let Some(modified) = self.last_modified(target) else {
+            return true;
+        };
+        SystemTime::now()
+            .duration_since(modified)
+            .is_ok_and(|age| age > older_than)
+    }
+}
+
+/// The two newest direct children of `project`, by the newest file time
+/// in each. Symlinks are not followed.
+fn scan_project(project: &Path) -> Newest {
+    let mut newest = Newest::default();
+    let Ok(children) = std::fs::read_dir(project) else {
+        return newest;
+    };
+    for child in children.flatten() {
+        let path = child.path();
+        let time = walkdir::WalkDir::new(&path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .filter_map(|e| e.metadata().ok()?.modified().ok())
+            .max();
+        if let Some(time) = time {
+            newest.add(path, time);
         }
     }
     newest
-}
-
-/// Whether the project holding `target` was last modified before
-/// `older_than` ago. A project with no other file counts as old.
-pub fn is_older_than(target: &Path, older_than: Duration) -> bool {
-    let Some(modified) = project_last_modified(target) else {
-        return true;
-    };
-    SystemTime::now()
-        .duration_since(modified)
-        .is_ok_and(|age| age > older_than)
 }
 
 #[cfg(test)]
@@ -94,7 +147,36 @@ mod tests {
             }
         }
         // Only `src0.py` is new; it must be found wherever it is listed.
-        assert!(!is_older_than(&target, Duration::from_secs(86400)));
+        assert!(!AgeIndex::default().is_older_than(&target, Duration::from_secs(86400)));
+    }
+
+    #[test]
+    fn rejects_overflowing_duration() {
+        assert!(parse_duration("4611686018427387904h").is_err());
+    }
+
+    /// Other candidates in the same project count as changes; the
+    /// candidate itself does not.
+    #[test]
+    fn each_file_target_excludes_only_itself() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let old = SystemTime::now() - Duration::from_secs(90 * 86400);
+        for name in ["b.pyc", "src.py"] {
+            let file = dir.path().join(name);
+            std::fs::write(&file, "").unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&file)
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+        std::fs::write(dir.path().join("a.pyc"), "").unwrap();
+
+        let mut index = AgeIndex::default();
+        let day = Duration::from_secs(86400);
+        assert!(index.is_older_than(&dir.path().join("a.pyc"), day));
+        assert!(!index.is_older_than(&dir.path().join("b.pyc"), day));
     }
 
     #[test]
