@@ -238,6 +238,17 @@ pub static TERRAFORM: SimpleAdapter = SimpleAdapter {
     }],
 };
 
+/// Elm build cache.
+pub static ELM: SimpleAdapter = SimpleAdapter {
+    name: "elm",
+    label: "Elm build cache",
+    rules: &[Rule {
+        dirs: &["elm-stuff"],
+        context: &["elm.json"],
+        unless_inside: &[],
+    }],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
