@@ -85,6 +85,21 @@ pub trait Adapter: Send + Sync {
 /// Symlinks are not followed; errors on individual entries are skipped.
 /// Sub-directories are measured in parallel on the rayon thread pool.
 pub fn compute_dir_size(path: &Path) -> u64 {
+    dir_stats(path, true).size
+}
+
+/// What one walk of a directory tree learns.
+#[derive(Default)]
+pub struct DirStats {
+    /// Total byte count of regular files; 0 unless requested.
+    pub size: u64,
+    /// Every directory at or below the root that holds a `.git` entry.
+    pub repos: Vec<PathBuf>,
+}
+
+/// Walk the tree at `path` once, in parallel, and collect [`DirStats`].
+/// Symlinks are not followed; errors on individual entries are skipped.
+pub fn dir_stats(path: &Path, with_size: bool) -> DirStats {
     /// An entry with its directory handle already released.
     enum Item {
         Dir(PathBuf),
@@ -92,29 +107,46 @@ pub fn compute_dir_size(path: &Path) -> u64 {
     }
 
     let Ok(entries) = std::fs::read_dir(path) else {
-        return 0;
+        return DirStats::default();
     };
+    let mut is_repo = false;
     // Collect owned data and drop the entries before recursing: on Unix
     // every `DirEntry` keeps its directory handle open, so holding them
     // would keep one handle per level open on deep trees.
     let items: Vec<Item> = entries
         .flatten()
-        .filter_map(|entry| match entry.file_type() {
-            // `DirEntry::file_type` does not follow symlinks.
-            Ok(t) if t.is_dir() => Some(Item::Dir(entry.path())),
-            Ok(t) if t.is_file() => {
-                Some(Item::File(entry.metadata().map(|m| m.len()).unwrap_or(0)))
+        .filter_map(|entry| {
+            if entry.file_name() == ".git" {
+                is_repo = true;
             }
-            _ => None,
+            match entry.file_type() {
+                // `DirEntry::file_type` does not follow symlinks.
+                Ok(t) if t.is_dir() => Some(Item::Dir(entry.path())),
+                Ok(t) if t.is_file() && with_size => {
+                    Some(Item::File(entry.metadata().map(|m| m.len()).unwrap_or(0)))
+                }
+                _ => None,
+            }
         })
         .collect();
-    items
+    let mut stats = items
         .par_iter()
         .map(|item| match item {
-            Item::Dir(dir) => compute_dir_size(dir),
-            Item::File(len) => *len,
+            Item::Dir(dir) => dir_stats(dir, with_size),
+            Item::File(len) => DirStats {
+                size: *len,
+                repos: Vec::new(),
+            },
         })
-        .sum()
+        .reduce(DirStats::default, |mut a, b| {
+            a.size += b.size;
+            a.repos.extend(b.repos);
+            a
+        });
+    if is_repo {
+        stats.repos.push(path.to_path_buf());
+    }
+    stats
 }
 
 #[cfg(test)]
@@ -179,6 +211,17 @@ mod tests {
         fs::create_dir_all(&deepest).unwrap();
         fs::write(deepest.join("f"), [0u8; 1000]).unwrap();
         assert_eq!(compute_dir_size(dir.path()), 1000);
+    }
+
+    #[test]
+    fn dir_stats_finds_nested_repositories() {
+        let dir = TempDir::new().unwrap();
+        let lib = dir.path().join("vendor").join("lib");
+        fs::create_dir_all(lib.join(".git")).unwrap();
+        fs::write(lib.join("a.go"), b"abc").unwrap();
+        let stats = dir_stats(dir.path(), false);
+        assert_eq!(stats.repos, vec![lib]);
+        assert_eq!(stats.size, 0, "size is not computed when not requested");
     }
 
     #[test]

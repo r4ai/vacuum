@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-use crate::adapter::{Adapter, CleanTarget, Context, compute_dir_size};
+use crate::adapter::{Adapter, CleanTarget, Context, dir_stats};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::cli::Cli;
 use crate::tracked::TrackedIndex;
@@ -125,7 +125,7 @@ fn walk(
         // Only gitignore can be enabled — no need for a second walk.
         if gitignore {
             for target in scan_gitignore(root) {
-                out.emit(target);
+                out.emit(target, None);
             }
         }
         return;
@@ -155,10 +155,11 @@ fn walk(
         });
         for found in rx {
             match found {
-                Found::Adapter(target) | Found::Unsized(target) => out.emit(target),
+                Found::Adapter(target, nested) => out.emit(target, Some(nested)),
+                Found::Unsized(target) => out.emit(target, None),
                 Found::Ignored(path) => {
                     if let Some(target) = ignored.remove(&path) {
-                        out.emit(target);
+                        out.emit(target, None);
                     }
                 }
             }
@@ -171,15 +172,16 @@ fn walk(
     rest.sort_by(|a, b| a.path.cmp(&b.path));
     for target in rest {
         if !out.covers(&target.path) {
-            out.emit(target);
+            out.emit(target, None);
         }
     }
 }
 
 /// A match found by a worker thread of [`walk_parallel`].
 enum Found {
-    /// An adapter matched the entry.
-    Adapter(CleanTarget),
+    /// An adapter matched the entry. Also carries the repository roots
+    /// at or below it (see [`dir_stats`]).
+    Adapter(CleanTarget, Vec<PathBuf>),
     /// An adapter matched a directory whose size is not computed yet.
     /// Never sent through the channel.
     Unsized(CleanTarget),
@@ -210,15 +212,17 @@ fn walk_parallel(
                 };
                 let (state, found) = judge(&entry, adapters, ignored, &mut ctx);
                 let found = match found {
-                    Some(Found::Unsized(mut target)) if !no_size => {
+                    Some(Found::Unsized(mut target)) => {
+                        // Directory walks run as rayon tasks, off the walk.
                         let tx = tx.clone();
                         sizes.spawn(move |_| {
-                            target.size = compute_dir_size(&target.path);
-                            let _ = tx.send(Found::Adapter(target));
+                            // One walk yields the size and nested repositories.
+                            let stats = dir_stats(&target.path, !no_size);
+                            target.size = stats.size;
+                            let _ = tx.send(Found::Adapter(target, stats.repos));
                         });
                         None
                     }
-                    Some(Found::Unsized(target)) => Some(Found::Adapter(target)),
                     other => other,
                 };
                 if let Some(found) = found
@@ -277,7 +281,8 @@ fn judge(
             (skip, Some(Found::Unsized(target)))
         } else {
             target.size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            (skip, Some(Found::Adapter(target)))
+            // A file holds no repository.
+            (skip, Some(Found::Adapter(target, Vec::new())))
         }
     } else if ignored.contains(path) {
         (skip, Some(Found::Ignored(path.to_path_buf())))
@@ -298,8 +303,9 @@ struct Emitter<'a> {
 impl Emitter<'_> {
     /// Report `target`, unless it was reported already or it contains
     /// tracked files that are not wanted.
-    fn emit(&mut self, mut target: CleanTarget) {
-        target.tracked = self.tracked.is_tracked(&target.path);
+    /// `nested` are the repository roots at or below the target, if known.
+    fn emit(&mut self, mut target: CleanTarget, nested: Option<Vec<PathBuf>>) {
+        target.tracked = self.tracked.is_tracked(&target.path, nested.as_deref());
         if target.tracked && !self.include_tracked {
             return;
         }

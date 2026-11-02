@@ -4,6 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::adapter::dir_stats;
+
 /// Answers whether a path is, or contains, a file tracked by git.
 ///
 /// Each repository is listed with `git ls-files` only once. Paths outside
@@ -16,11 +18,28 @@ pub struct TrackedIndex {
 }
 
 impl TrackedIndex {
-    pub fn is_tracked(&mut self, path: &Path) -> bool {
-        // A candidate that is a repository itself (e.g. a `vendor/`
-        // checkout) is tracked when its own index lists any file.
-        if path.join(".git").exists() && self.tracked_files(path).is_some_and(|t| !t.is_empty()) {
-            return true;
+    /// `nested` are the repository roots at or below `path` (see
+    /// [`dir_stats`]); `None` finds them here.
+    pub fn is_tracked(&mut self, path: &Path, nested: Option<&[PathBuf]>) -> bool {
+        // A repository at or below the candidate (e.g. a `vendor/`
+        // checkout, or `vendor/lib/.git`) is deleted with it. Treat the
+        // candidate as tracked when any such repository lists files.
+        let found;
+        let nested = match nested {
+            Some(nested) => nested,
+            None => {
+                found = if path.is_dir() {
+                    dir_stats(path, false).repos
+                } else {
+                    Vec::new()
+                };
+                &found
+            }
+        };
+        for root in nested {
+            if self.tracked_files(root).is_some_and(|t| !t.is_empty()) {
+                return true;
+            }
         }
         let Some(root) = repository_root(path) else {
             return false;
@@ -115,9 +134,9 @@ mod tests {
         git(root, &["add", "."]);
 
         let mut index = TrackedIndex::default();
-        assert!(index.is_tracked(&root.join("vendor")));
-        assert!(index.is_tracked(&root.join("vendor").join("lib")));
-        assert!(index.is_tracked(&root.join("vendor").join("lib").join("a.go")));
+        assert!(index.is_tracked(&root.join("vendor"), None));
+        assert!(index.is_tracked(&root.join("vendor").join("lib"), None));
+        assert!(index.is_tracked(&root.join("vendor").join("lib").join("a.go"), None));
     }
 
     #[test]
@@ -131,7 +150,7 @@ mod tests {
         fs::write(root.join("node_modules").join("a.js"), "").unwrap();
 
         let mut index = TrackedIndex::default();
-        assert!(!index.is_tracked(&root.join("node_modules")));
+        assert!(!index.is_tracked(&root.join("node_modules"), None));
     }
 
     #[test]
@@ -144,7 +163,21 @@ mod tests {
         git(&vendor, &["add", "."]);
 
         let mut index = TrackedIndex::default();
-        assert!(index.is_tracked(&vendor));
+        assert!(index.is_tracked(&vendor, None));
+    }
+
+    #[test]
+    fn candidate_holding_a_nested_repository_is_tracked() {
+        let dir = TempDir::new().unwrap();
+        let vendor = dir.path().join("vendor");
+        let lib = vendor.join("lib");
+        fs::create_dir_all(&lib).unwrap();
+        fs::write(lib.join("lib.go"), "").unwrap();
+        git(&lib, &["init", "-q"]);
+        git(&lib, &["add", "."]);
+
+        let mut index = TrackedIndex::default();
+        assert!(index.is_tracked(&vendor, None));
     }
 
     #[cfg(unix)]
@@ -165,7 +198,7 @@ mod tests {
         git(root, &["add", "."]);
 
         let mut index = TrackedIndex::default();
-        assert!(index.is_tracked(&app.join("vendor")));
+        assert!(index.is_tracked(&app.join("vendor"), None));
     }
 
     #[test]
@@ -174,6 +207,6 @@ mod tests {
         fs::create_dir(dir.path().join("vendor")).unwrap();
 
         let mut index = TrackedIndex::default();
-        assert!(!index.is_tracked(&dir.path().join("vendor")));
+        assert!(!index.is_tracked(&dir.path().join("vendor"), None));
     }
 }
