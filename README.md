@@ -28,6 +28,7 @@ safe モードでは、Enter を押すと確認ダイアログが出る。`y` �
 | -------------------- | ---------------------------------------------------------- |
 | `safe`（デフォルト） | 候補を一覧表示し、削除するものをインタラクティブに選択する |
 | `auto`               | 確認なしで全候補を自動削除する                             |
+| `list`               | 候補を一覧表示するだけで、削除しない（端末がなくても使える） |
 
 ```sh
 # インタラクティブに選択して削除
@@ -35,6 +36,9 @@ vacuum ~/projects
 
 # 全候補を自動削除
 vacuum ~/projects --mode auto
+
+# 削除せず候補を一覧表示する（スクリプトや CI でも使える）
+vacuum ~/projects --mode list
 
 # 削除せず候補を確認する
 vacuum ~/projects --dry-run
@@ -91,10 +95,10 @@ vacuum ~/projects --min-size 100MB
 
 ### JSON で出力する
 
-auto モードで `--json` を付けると、候補と削除結果を JSON で標準出力に出す。`jq` での集計や、ほかのツールとの連携に使う。
+list モードか auto モードで `--json` を付けると、候補と削除結果を JSON で標準出力に出す。list モードでは削除しないので、`dry_run` は常に `true` になる。`jq` での集計や、ほかのツールとの連携に使う。
 
 ```sh
-vacuum ~/projects --mode auto --dry-run --json | jq '.total_size'
+vacuum ~/projects --mode list --json | jq '.total_size'
 ```
 
 ```json

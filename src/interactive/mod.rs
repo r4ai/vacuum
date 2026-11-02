@@ -257,7 +257,7 @@ pub fn run_tui_flow(roots: &Roots, cli: &Cli) -> anyhow::Result<TuiResult> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         anyhow::bail!(
             "safe mode requires an interactive terminal.\n\
-             Use `--mode auto --dry-run` to list targets, \
+             Use `--mode list` to list targets, \
              or `--mode auto` to delete them without prompts."
         );
     }

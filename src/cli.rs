@@ -154,6 +154,8 @@ pub enum Mode {
     Safe,
     /// Delete all found targets automatically without prompting
     Auto,
+    /// Only list the targets; never delete. Needs no terminal
+    List,
 }
 
 #[cfg(test)]
