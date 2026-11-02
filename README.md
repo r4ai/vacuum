@@ -174,6 +174,7 @@ gitignore = false
 | フラグ        | 削除対象                                       | デフォルト      |
 | ------------- | ---------------------------------------------- | --------------- |
 | `--node`      | `node_modules/`                                | on              |
+| `--js-cache`  | `.next/`, `.nuxt/`, `.svelte-kit/`, `.turbo/`, `.parcel-cache/`, `.angular/` | on |
 | `--cargo`     | `target/`                                      | on              |
 | `--python`    | `__pycache__/`, `.venv/`, `dist/`, `build/` 等 | on              |
 | `--go`        | `vendor/`                                      | on              |
