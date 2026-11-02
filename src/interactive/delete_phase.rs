@@ -23,6 +23,8 @@ pub struct DeletingState {
     pub start: Instant,
     pub dry_run: bool,
     pub method: DeleteMethod,
+    /// The targets being deleted.
+    pub targets: Vec<CleanTarget>,
 }
 
 impl DeletingState {
@@ -30,8 +32,9 @@ impl DeletingState {
     pub fn new(targets: Vec<CleanTarget>, dry_run: bool, method: DeleteMethod) -> Self {
         let total = targets.len();
         let (tx, rx) = mpsc::channel();
+        let to_delete = targets.clone();
         std::thread::spawn(move || {
-            delete_with_progress(targets, dry_run, method, tx);
+            delete_with_progress(to_delete, dry_run, method, tx);
         });
         Self {
             rx,
@@ -44,6 +47,16 @@ impl DeletingState {
             start: Instant::now(),
             dry_run,
             method,
+            targets,
+        }
+    }
+
+    /// The final result, leaving the state empty.
+    pub fn take_result(&mut self) -> super::TuiResult {
+        super::TuiResult::Completed {
+            freed: self.freed,
+            errors: std::mem::take(&mut self.errors),
+            targets: std::mem::take(&mut self.targets),
         }
     }
 

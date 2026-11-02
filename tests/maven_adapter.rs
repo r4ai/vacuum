@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -14,7 +13,7 @@ fn auto_mode_deletes_maven_target() {
         b"cafebabe",
     );
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
