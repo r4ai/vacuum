@@ -177,6 +177,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         kind: Kind::Entry(&simple::PHP),
     },
     AdapterSpec {
+        name: "ruby",
+        label: "Ruby Bundler",
+        targets: "vendor/bundle/",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::RUBY),
+    },
+    AdapterSpec {
         name: GitignoreAdapter::NAME,
         label: "Gitignore",
         targets: ".gitignore-matched paths",

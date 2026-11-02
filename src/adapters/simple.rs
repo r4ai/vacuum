@@ -202,6 +202,17 @@ pub static PHP: SimpleAdapter = SimpleAdapter {
     }],
 };
 
+/// Bundler gems installed into the project. `.bundle/` is kept: its `config` holds user settings.
+pub static RUBY: SimpleAdapter = SimpleAdapter {
+    name: "ruby",
+    label: "Bundler gems",
+    rules: &[Rule {
+        dirs: &["vendor/bundle"],
+        context: &["Gemfile"],
+        unless_inside: &[],
+    }],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
