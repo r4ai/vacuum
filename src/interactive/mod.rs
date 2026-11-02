@@ -1,15 +1,17 @@
 use std::io::{self, IsTerminal as _};
 use std::path::Path;
+use std::sync::Once;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Context as _;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
     MouseEventKind,
 };
-use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use crossterm::{cursor, execute};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
@@ -187,6 +189,41 @@ fn run_loop(
     }
 }
 
+// ─── Terminal restoration ─────────────────────────────────────────────────────
+
+/// Whether the terminal is in raw mode and the alternate screen.
+static TUI_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Leave raw mode and the alternate screen, and show the cursor again.
+/// Does nothing if the TUI is not active.
+fn restore_terminal() {
+    if !TUI_ACTIVE.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    let _ = disable_raw_mode();
+    let _ = execute!(
+        io::stdout(),
+        DisableMouseCapture,
+        LeaveAlternateScreen,
+        cursor::Show
+    );
+}
+
+/// Restore the terminal before the panic message is printed, so that a
+/// panic on the main thread does not leave the terminal in raw mode.
+fn install_panic_hook() {
+    static INSTALLED: Once = Once::new();
+    INSTALLED.call_once(|| {
+        let original = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if std::thread::current().name() == Some("main") {
+                restore_terminal();
+            }
+            original(info);
+        }));
+    });
+}
+
 // ─── Public entry point ───────────────────────────────────────────────────────
 
 /// Run the full safe-mode TUI workflow:
@@ -200,23 +237,21 @@ pub fn run_tui_flow(root: &Path, cli: &Cli) -> anyhow::Result<TuiResult> {
         );
     }
 
-    enable_raw_mode().context("Failed to enable raw mode")?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
-        .context("Failed to enter alternate screen")?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).context("Failed to create terminal")?;
+    install_panic_hook();
 
-    let result = run_loop(&mut terminal, root, cli);
+    enable_raw_mode().context("Failed to enable raw mode")?;
+    TUI_ACTIVE.store(true, Ordering::SeqCst);
+    let mut stdout = io::stdout();
+    let entered = execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+        .context("Failed to enter alternate screen");
+    let result = entered.and_then(|()| {
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend).context("Failed to create terminal")?;
+        run_loop(&mut terminal, root, cli)
+    });
 
     // Always restore terminal, even on error
-    let _ = disable_raw_mode();
-    let _ = execute!(
-        terminal.backend_mut(),
-        DisableMouseCapture,
-        LeaveAlternateScreen
-    );
-    let _ = terminal.show_cursor();
+    restore_terminal();
 
     result
 }
