@@ -32,6 +32,10 @@ pub struct Cli {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Also list targets that contain files tracked by git [default: off]
+    #[arg(long)]
+    pub include_tracked: bool,
+
     /// Move targets to the OS trash instead of deleting them permanently
     #[arg(long)]
     pub trash: bool,

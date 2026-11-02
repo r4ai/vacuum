@@ -434,6 +434,15 @@ pub fn popup_area(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
     .split(vert[1])[1]
 }
 
+/// The path shown in the table, marked when the target holds tracked files.
+fn path_label(path: &str, target: &CleanTarget) -> String {
+    if target.tracked {
+        format!("{path} [tracked]")
+    } else {
+        path.to_string()
+    }
+}
+
 pub fn render(frame: &mut ratatui::Frame, app: &mut App) {
     let area = frame.area();
 
@@ -632,7 +641,10 @@ fn render_table(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
             Row::new(vec![
                 Cell::from(check).style(check_style),
                 Cell::from(highlight_matches(t.adapter, query)),
-                Cell::from(highlight_matches(&rel.display().to_string(), query)),
+                Cell::from(highlight_matches(
+                    &path_label(&rel.display().to_string(), t),
+                    query,
+                )),
                 Cell::from(ByteSize(t.size).display().si().to_string())
                     .style(Style::default().fg(Color::Cyan)),
                 Cell::from(highlight_matches(&t.description, query)),
@@ -1139,6 +1151,7 @@ mod tests {
             .iter()
             .map(|name| CleanTarget {
                 path: PathBuf::from("/root").join(name),
+                tracked: false,
                 adapter: "node",
                 description: "test".into(),
                 size: 1500,

@@ -65,6 +65,14 @@ vacuum ~/projects --trash
 
 コンテキストファイル（`package.json`, `Cargo.toml` 等）が存在するディレクトリのみを対象とする。誤検知を防ぐためのガードとして機能する。
 
+### git 管理下の候補
+
+git で追跡しているファイルを含む候補は、既定で除外する。
+例えば、意図的にコミットした Go の `vendor/` は削除しない。
+`--include-tracked` を付けると候補に含め、一覧で `[tracked]` と表示する。
+
+判定には `git ls-files` を使う。git が使えない場合や、リポジトリの外にある候補は、追跡なしとして扱う。
+
 ### Git worktree
 
 `gitignore` アダプターは Git worktree やサブモジュール（`.git` を持つディレクトリ）を丸ごと削除しない。
