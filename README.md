@@ -132,6 +132,26 @@ cargo clippy
 cargo fmt
 ```
 
+### ベンチマーク
+
+性能改善の効果は、ダミーツリーに対する実行時間で比べる。
+計測には [hyperfine](https://github.com/sharkdp/hyperfine) を使う。
+
+```sh
+# ダミーツリーを生成する（第 2 引数はプロジェクト数。既定は 200）
+cargo run --release --example gen_bench_tree -- /tmp/vacuum-bench 200
+
+# 計測する（削除はしない）
+cargo build --release
+hyperfine --warmup 3 \
+  'target/release/vacuum /tmp/vacuum-bench -m auto --dry-run --no-size' \
+  'target/release/vacuum /tmp/vacuum-bench -m auto --dry-run'
+```
+
+- 生成するツリーは決定的で、同じ引数なら毎回同じになる。
+- 変更前後を比べるときは、それぞれのバイナリを別名でコピーし、1 回の `hyperfine` で並べて計測する。
+- 上の手順はページキャッシュが温まった状態を測る。コールドキャッシュを測るなら、Linux では `--prepare 'sync; echo 3 | sudo tee /proc/sys/vm/drop_caches'` を付ける。
+
 ### アダプターの追加
 
 アダプターは 1 つのエントリ（ディレクトリかファイル）を判定するだけでよい。
