@@ -126,3 +126,30 @@ fn deletion_failure_exits_with_non_zero_code() {
     );
     assert!(project.join("node_modules").exists());
 }
+
+/// Windows refuses to delete read-only files; `node_modules` and `.git`
+/// often hold some.
+#[test]
+fn read_only_files_are_deleted() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::make_file(&root.join("package.json"), b"{}");
+    let file = root.join("node_modules").join("pkg").join("locked.js");
+    common::make_file(&file, b"x");
+    let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&file, permissions).unwrap();
+
+    let output = common::vacuum()
+        .arg(root)
+        .args(["--mode", "auto"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!root.join("node_modules").exists());
+}
