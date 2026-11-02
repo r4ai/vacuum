@@ -4,76 +4,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
+use crate::adapters::REGISTRY;
 use crate::scanner::ScanConfig;
-
-// ─── Adapter metadata ────────────────────────────────────────────────────────
-
-struct AdapterEntry {
-    name: &'static str,
-    description: &'static str,
-    is_safe: bool,
-    get: fn(&ScanConfig) -> bool,
-    set: fn(&mut ScanConfig, bool),
-}
-
-static ALL_ADAPTERS: &[AdapterEntry] = &[
-    AdapterEntry {
-        name: "node",
-        description: "node_modules/",
-        is_safe: true,
-        get: |c| c.node,
-        set: |c, v| c.node = v,
-    },
-    AdapterEntry {
-        name: "cargo",
-        description: "target/",
-        is_safe: true,
-        get: |c| c.cargo,
-        set: |c, v| c.cargo = v,
-    },
-    AdapterEntry {
-        name: "python",
-        description: "__pycache__/, .venv/, venv/, dist/, build/, .eggs/, *.pyc",
-        is_safe: true,
-        get: |c| c.python,
-        set: |c, v| c.python = v,
-    },
-    AdapterEntry {
-        name: "go",
-        description: "vendor/",
-        is_safe: true,
-        get: |c| c.go,
-        set: |c, v| c.go = v,
-    },
-    AdapterEntry {
-        name: "gradle",
-        description: ".gradle/, build/",
-        is_safe: true,
-        get: |c| c.gradle,
-        set: |c, v| c.gradle = v,
-    },
-    AdapterEntry {
-        name: "maven",
-        description: "target/",
-        is_safe: true,
-        get: |c| c.maven,
-        set: |c, v| c.maven = v,
-    },
-    AdapterEntry {
-        name: "ocaml",
-        description: "_build/, _opam/",
-        is_safe: true,
-        get: |c| c.ocaml,
-        set: |c, v| c.ocaml = v,
-    },
-    AdapterEntry {
-        name: "gitignore",
-        description: ".gitignore-matched paths",
-        is_safe: false,
-        get: |c| c.gitignore,
-        set: |c, v| c.gitignore = v,
-    },
-];
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -96,11 +28,11 @@ impl AdapterSelectionState {
     }
 
     pub fn any_selected(&self) -> bool {
-        ALL_ADAPTERS.iter().any(|e| (e.get)(&self.cfg))
+        self.cfg.any_enabled()
     }
 
     fn move_up(&mut self) {
-        let len = ALL_ADAPTERS.len();
+        let len = REGISTRY.len();
         self.cursor = if self.cursor == 0 {
             len - 1
         } else {
@@ -110,7 +42,7 @@ impl AdapterSelectionState {
     }
 
     fn move_down(&mut self) {
-        let len = ALL_ADAPTERS.len();
+        let len = REGISTRY.len();
         self.cursor = if self.cursor + 1 >= len {
             0
         } else {
@@ -120,9 +52,9 @@ impl AdapterSelectionState {
     }
 
     fn toggle(&mut self) {
-        if let Some(entry) = ALL_ADAPTERS.get(self.cursor) {
-            let cur = (entry.get)(&self.cfg);
-            (entry.set)(&mut self.cfg, !cur);
+        if let Some(spec) = REGISTRY.get(self.cursor) {
+            let enabled = self.cfg.is_enabled(spec.name);
+            self.cfg.set_enabled(spec.name, !enabled);
         }
     }
 }
@@ -158,12 +90,12 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
     frame.render_widget(header, chunks[0]);
 
     // Adapter list
-    let items: Vec<ListItem> = ALL_ADAPTERS
+    let items: Vec<ListItem> = REGISTRY
         .iter()
         .enumerate()
-        .map(|(i, entry)| {
+        .map(|(i, spec)| {
             let is_cursor = i == state.cursor;
-            let enabled = (entry.get)(&state.cfg);
+            let enabled = state.cfg.is_enabled(spec.name);
             let check = if enabled { "✓" } else { "✗" };
             let check_style = if enabled {
                 Style::default().fg(Color::Green)
@@ -172,7 +104,7 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            let safe_badge = if entry.is_safe {
+            let safe_badge = if spec.is_safe {
                 Span::styled(" [safe]", Style::default().fg(Color::Green))
             } else {
                 Span::styled(" [custom]", Style::default().fg(Color::Yellow))
@@ -182,10 +114,10 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
                 Span::styled(check, check_style),
                 Span::raw(" "),
                 Span::styled(
-                    format!("{:<10}", entry.name),
+                    format!("{:<10}", spec.name),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(entry.description, Style::default().fg(Color::Gray)),
+                Span::styled(spec.targets, Style::default().fg(Color::Gray)),
                 safe_badge,
             ]))
         })
@@ -294,17 +226,15 @@ mod tests {
     }
 
     fn scan_config(node: bool, gitignore: bool) -> ScanConfig {
-        ScanConfig {
+        let mut cfg = ScanConfig {
             no_size: false,
-            node,
-            cargo: true,
-            python: true,
-            go: true,
-            gradle: true,
-            maven: true,
-            ocaml: true,
-            gitignore,
-        }
+            enabled: ["cargo", "python", "go", "gradle", "maven", "ocaml"]
+                .into_iter()
+                .collect(),
+        };
+        cfg.set_enabled("node", node);
+        cfg.set_enabled("gitignore", gitignore);
+        cfg
     }
 
     fn is_checked(row: &str) -> bool {

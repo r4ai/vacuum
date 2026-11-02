@@ -3,10 +3,7 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 use crate::adapter::{Adapter, CleanTarget, Context, compute_dir_size};
-use crate::adapters::{
-    CargoAdapter, GitignoreAdapter, GoAdapter, GradleAdapter, MavenAdapter, NodeAdapter,
-    OcamlAdapter, PythonAdapter,
-};
+use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::cli::Cli;
 
 /// Scanner settings extracted from CLI flags.
@@ -14,53 +11,53 @@ use crate::cli::Cli;
 #[derive(Clone, Debug)]
 pub struct ScanConfig {
     pub no_size: bool,
-    pub node: bool,
-    pub cargo: bool,
-    pub python: bool,
-    pub go: bool,
-    pub gradle: bool,
-    pub maven: bool,
-    pub ocaml: bool,
-    pub gitignore: bool,
+    /// Names of the enabled adapters (see [`REGISTRY`]).
+    pub enabled: HashSet<&'static str>,
 }
 
 impl From<&Cli> for ScanConfig {
     fn from(cli: &Cli) -> Self {
         Self {
             no_size: cli.no_size,
-            node: cli.node,
-            cargo: cli.cargo,
-            python: cli.python,
-            go: cli.go,
-            gradle: cli.gradle,
-            maven: cli.maven,
-            ocaml: cli.ocaml,
-            gitignore: cli.gitignore,
+            enabled: cli.adapters.enabled.clone(),
         }
     }
 }
 
 impl ScanConfig {
+    pub fn is_enabled(&self, name: &str) -> bool {
+        self.enabled.contains(name)
+    }
+
+    pub fn set_enabled(&mut self, name: &'static str, enabled: bool) {
+        if enabled {
+            self.enabled.insert(name);
+        } else {
+            self.enabled.remove(name);
+        }
+    }
+
     /// Whether at least one adapter is enabled.
     pub fn any_enabled(&self) -> bool {
-        self.gitignore || !self.entry_adapters().is_empty()
+        !self.enabled.is_empty()
     }
 
     /// The enabled entry-judging adapters, in priority order.
-    /// The gitignore adapter is not included; see [`GitignoreAdapter`].
-    fn entry_adapters(&self) -> Vec<Box<dyn Adapter>> {
-        let all: [(bool, Box<dyn Adapter>); 7] = [
-            (self.node, Box::new(NodeAdapter)),
-            (self.cargo, Box::new(CargoAdapter)),
-            (self.python, Box::new(PythonAdapter)),
-            (self.go, Box::new(GoAdapter)),
-            (self.gradle, Box::new(GradleAdapter)),
-            (self.maven, Box::new(MavenAdapter)),
-            (self.ocaml, Box::new(OcamlAdapter)),
-        ];
-        all.into_iter()
-            .filter_map(|(enabled, adapter)| enabled.then_some(adapter))
+    fn entry_adapters(&self) -> Vec<&'static dyn Adapter> {
+        REGISTRY
+            .iter()
+            .filter(|spec| self.is_enabled(spec.name))
+            .filter_map(|spec| match spec.kind {
+                Kind::Entry(adapter) => Some(adapter),
+                Kind::Gitignore => None,
+            })
             .collect()
+    }
+
+    fn gitignore_enabled(&self) -> bool {
+        REGISTRY
+            .iter()
+            .any(|spec| matches!(spec.kind, Kind::Gitignore) && self.is_enabled(spec.name))
     }
 }
 
@@ -76,11 +73,9 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
 /// Scan with only `adapter` enabled and return the sorted targets.
 /// Lets adapter unit tests exercise the production walk.
 #[cfg(test)]
-pub fn scan_with(adapter: impl Adapter + 'static, root: &Path) -> Vec<CleanTarget> {
+pub fn scan_with(adapter: impl Adapter, root: &Path) -> Vec<CleanTarget> {
     let mut all: Vec<CleanTarget> = Vec::new();
-    walk(root, &[Box::new(adapter)], false, false, &mut |t| {
-        all.push(t)
-    });
+    walk(root, &[&adapter], false, false, &mut |t| all.push(t));
     all.sort_by(|a, b| a.path.cmp(&b.path));
     all
 }
@@ -96,7 +91,7 @@ pub fn scan_streaming(
     walk(
         root,
         &cfg.entry_adapters(),
-        cfg.gitignore,
+        cfg.gitignore_enabled(),
         cfg.no_size,
         on_found,
     );
@@ -106,7 +101,7 @@ pub fn scan_streaming(
 /// Walk `root` once, asking `adapters` about each entry in order.
 fn walk(
     root: &Path,
-    adapters: &[Box<dyn Adapter>],
+    adapters: &[&dyn Adapter],
     gitignore: bool,
     no_size: bool,
     on_found: &mut dyn FnMut(CleanTarget),
@@ -240,26 +235,12 @@ fn scan_gitignore(root: &Path) -> Vec<CleanTarget> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::Mode;
+    use clap::Parser as _;
     use std::fs;
     use tempfile::TempDir;
 
     fn enabled_cli() -> Cli {
-        Cli {
-            path: PathBuf::from("."),
-            mode: Mode::Safe,
-            dry_run: false,
-            no_size: false,
-            generate_completions: None,
-            node: true,
-            cargo: true,
-            python: true,
-            go: true,
-            gradle: true,
-            maven: true,
-            ocaml: true,
-            gitignore: false,
-        }
+        Cli::try_parse_from(["vacuum"]).unwrap()
     }
 
     #[test]
@@ -324,7 +305,7 @@ mod tests {
         fs::create_dir(dir.path().join("node_modules")).unwrap();
 
         let mut cli = enabled_cli();
-        cli.node = false;
+        cli.adapters.enabled.remove("node");
         let results = scan_enabled(dir.path(), &cli).unwrap();
         assert!(results.is_empty());
     }

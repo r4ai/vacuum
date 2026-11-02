@@ -137,13 +137,11 @@ cargo fmt
 アダプターは 1 つのエントリ（ディレクトリかファイル）を判定するだけでよい。
 ディレクトリの走査は `src/scanner.rs` が 1 回だけ行い、有効なアダプターに順に問い合わせる。
 
-1. `src/adapters/` に新しいファイルを作成する
-2. `Adapter` トレイトを実装する
-3. `src/adapters/mod.rs` に追加する
-4. `src/cli.rs` にフラグを追加する
-5. `src/scanner.rs` の `ScanConfig` と `entry_adapters` に組み込む
-6. `src/interactive/adapter_select.rs` の `ALL_ADAPTERS` に追加する
-7. `README.md` のアダプター一覧表を更新する
+1. `src/adapters/` に新しいファイルを作成し、`Adapter` トレイトを実装する
+2. `src/adapters/mod.rs` の `REGISTRY` に定義を 1 つ追加する
+3. `README.md` のアダプター一覧表を更新する（漏れるとテストが失敗する）
+
+CLI フラグ・スキャン設定・TUI のアダプター一覧は、`REGISTRY` から自動で生成される。
 
 ```rust
 // src/adapters/my_adapter.rs

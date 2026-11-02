@@ -1,6 +1,9 @@
-use clap::{Parser, ValueEnum};
+use clap::{Arg, ArgMatches, Args, Command, FromArgMatches, Parser, ValueEnum, value_parser};
 use clap_complete::Shell;
+use std::collections::HashSet;
 use std::path::PathBuf;
+
+use crate::adapters::REGISTRY;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -36,95 +39,68 @@ pub struct Cli {
     #[arg(long = "generate-completions", value_name = "SHELL")]
     pub generate_completions: Option<Shell>,
 
-    // ---- Safe adapters (default: on) ----------------------------------------
-    /// Node.js/npm adapter — removes node_modules/ [default: on]
-    #[arg(
-        long,
-        default_value_t = true,
-        num_args = 0..=1,
-        default_missing_value = "true",
-        value_name = "BOOL",
-        help_heading = "Adapters"
-    )]
-    pub node: bool,
+    #[command(flatten)]
+    pub adapters: AdapterFlags,
+}
 
-    /// Rust/Cargo adapter — removes target/ [default: on]
-    #[arg(
-        long,
-        default_value_t = true,
-        num_args = 0..=1,
-        default_missing_value = "true",
-        value_name = "BOOL",
-        help_heading = "Adapters"
-    )]
-    pub cargo: bool,
+/// The adapter flags (`--node`, `--gitignore=false`, ...), generated from
+/// [`REGISTRY`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdapterFlags {
+    /// Names of the enabled adapters.
+    pub enabled: HashSet<&'static str>,
+}
 
-    /// Python adapter — removes __pycache__/, .venv/, dist/, etc. [default: on]
-    #[arg(
-        long,
-        default_value_t = true,
-        num_args = 0..=1,
-        default_missing_value = "true",
-        value_name = "BOOL",
-        help_heading = "Adapters"
-    )]
-    pub python: bool,
+impl Args for AdapterFlags {
+    fn augment_args(cmd: Command) -> Command {
+        REGISTRY.iter().fold(cmd, |cmd, spec| {
+            let default = if spec.default_enabled { "on" } else { "off" };
+            let danger = if spec.is_safe { "" } else { " (dangerous)" };
+            cmd.arg(
+                Arg::new(spec.name)
+                    .long(spec.name)
+                    .value_parser(value_parser!(bool))
+                    .num_args(0..=1)
+                    .default_value(if spec.default_enabled {
+                        "true"
+                    } else {
+                        "false"
+                    })
+                    .default_missing_value("true")
+                    .value_name("BOOL")
+                    .help_heading("Adapters")
+                    .help(format!(
+                        "{} adapter — removes {}{danger} [default: {default}]",
+                        spec.label, spec.targets
+                    )),
+            )
+        })
+    }
 
-    /// Go adapter — removes vendor/ [default: on]
-    #[arg(
-        long,
-        default_value_t = true,
-        num_args = 0..=1,
-        default_missing_value = "true",
-        value_name = "BOOL",
-        help_heading = "Adapters"
-    )]
-    pub go: bool,
+    fn augment_args_for_update(cmd: Command) -> Command {
+        Self::augment_args(cmd)
+    }
+}
 
-    /// Gradle adapter — removes .gradle/, build/ [default: on]
-    #[arg(
-        long,
-        default_value_t = true,
-        num_args = 0..=1,
-        default_missing_value = "true",
-        value_name = "BOOL",
-        help_heading = "Adapters"
-    )]
-    pub gradle: bool,
+impl FromArgMatches for AdapterFlags {
+    fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
+        let enabled = REGISTRY
+            .iter()
+            .filter(|spec| {
+                matches
+                    .get_one::<bool>(spec.name)
+                    .copied()
+                    .unwrap_or(spec.default_enabled)
+            })
+            .map(|spec| spec.name)
+            .collect();
+        Ok(Self { enabled })
+    }
 
-    /// Maven adapter — removes target/ [default: on]
-    #[arg(
-        long,
-        default_value_t = true,
-        num_args = 0..=1,
-        default_missing_value = "true",
-        value_name = "BOOL",
-        help_heading = "Adapters"
-    )]
-    pub maven: bool,
-
-    /// OCaml/dune adapter — removes _build/, _opam/ [default: on]
-    #[arg(
-        long,
-        default_value_t = true,
-        num_args = 0..=1,
-        default_missing_value = "true",
-        value_name = "BOOL",
-        help_heading = "Adapters"
-    )]
-    pub ocaml: bool,
-
-    // ---- Dangerous adapters (default: off) -----------------------------------
-    /// Gitignore adapter — removes all files matched by .gitignore (dangerous) [default: off]
-    #[arg(
-        long,
-        default_value_t = false,
-        num_args = 0..=1,
-        default_missing_value = "true",
-        value_name = "BOOL",
-        help_heading = "Adapters"
-    )]
-    pub gitignore: bool,
+    fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
+        *self = Self::from_arg_matches(matches)?;
+        Ok(())
+    }
 }
 
 #[derive(ValueEnum, Clone, Debug, PartialEq)]
@@ -133,4 +109,40 @@ pub enum Mode {
     Safe,
     /// Delete all found targets automatically without prompting
     Auto,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn enabled(args: &[&str]) -> Vec<&'static str> {
+        let cli =
+            Cli::try_parse_from(std::iter::once("vacuum").chain(args.iter().copied())).unwrap();
+        let mut names: Vec<_> = cli.adapters.enabled.into_iter().collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn safe_adapters_are_enabled_by_default() {
+        assert_eq!(
+            enabled(&[]),
+            vec!["cargo", "go", "gradle", "maven", "node", "ocaml", "python"]
+        );
+    }
+
+    #[test]
+    fn flag_without_value_enables_adapter() {
+        assert!(enabled(&["--gitignore"]).contains(&"gitignore"));
+    }
+
+    #[test]
+    fn flag_with_false_disables_adapter() {
+        assert!(!enabled(&["--node=false"]).contains(&"node"));
+    }
+
+    #[test]
+    fn invalid_flag_value_is_rejected() {
+        assert!(Cli::try_parse_from(["vacuum", "--node=maybe"]).is_err());
+    }
 }
