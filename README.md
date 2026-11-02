@@ -111,6 +111,7 @@ vacuum ~/projects --min-size 100MB
 | `--dotnet` | `bin/`, `obj/`（`*.csproj` などと同じ階層） | on |
 | `--swift` | `.build/` | on |
 | `--haskell` | `.stack-work/`, `dist-newstyle/` | on |
+| `--elixir` | `_build/`, `deps/` | on |
 | `--gitignore` | `.gitignore` にマッチするファイルすべて        | **off**（危険） |
 
 コンテキストファイル（`package.json`, `Cargo.toml` 等）が存在するディレクトリのみを対象とする。誤検知を防ぐためのガードとして機能する。

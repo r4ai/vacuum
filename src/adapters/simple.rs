@@ -158,6 +158,17 @@ pub static HASKELL: SimpleAdapter = SimpleAdapter {
     ],
 };
 
+/// Mix build output and dependencies.
+pub static ELIXIR: SimpleAdapter = SimpleAdapter {
+    name: "elixir",
+    label: "Elixir build artifact",
+    rules: &[Rule {
+        dirs: &["_build", "deps"],
+        context: &["mix.exs"],
+        unless_inside: &[],
+    }],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

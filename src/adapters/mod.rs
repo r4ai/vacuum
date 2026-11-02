@@ -145,6 +145,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         kind: Kind::Entry(&simple::HASKELL),
     },
     AdapterSpec {
+        name: "elixir",
+        label: "Elixir",
+        targets: "_build/, deps/",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::ELIXIR),
+    },
+    AdapterSpec {
         name: GitignoreAdapter::NAME,
         label: "Gitignore",
         targets: ".gitignore-matched paths",
