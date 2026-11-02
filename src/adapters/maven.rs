@@ -1,7 +1,6 @@
 use std::path::Path;
-use walkdir::WalkDir;
 
-use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
+use crate::adapter::{Adapter, Context};
 
 pub struct MavenAdapter;
 
@@ -10,49 +9,16 @@ impl Adapter for MavenAdapter {
         "maven"
     }
 
-    fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
-        let mut targets = Vec::new();
-        let mut iter = WalkDir::new(root).follow_links(false).into_iter();
-
-        while let Some(entry) = iter.next() {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
-            let path = entry.path();
-
-            if !entry.file_type().is_dir() {
-                continue;
-            }
-            if entry.file_name() != "target" {
-                continue;
-            }
-
-            let parent = match path.parent() {
-                Some(p) => p,
-                None => continue,
-            };
-            if !parent.join("pom.xml").exists() {
-                continue;
-            }
-
-            let size = compute_dir_size(path);
-            targets.push(CleanTarget {
-                path: path.to_path_buf(),
-                adapter: self.name(),
-                description: "Maven build artifacts (target/)".into(),
-                size,
-            });
-            iter.skip_current_dir();
-        }
-
-        Ok(targets)
+    fn match_dir(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String> {
+        (name == "target" && ctx.has_file(parent, "pom.xml"))
+            .then(|| "Maven build artifacts (target/)".into())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scanner::scan_with;
     use std::fs;
     use tempfile::TempDir;
 
@@ -70,7 +36,7 @@ mod tests {
     fn no_target_returns_empty() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("pom.xml"), "<project/>").unwrap();
-        let targets = MavenAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(MavenAdapter, dir.path());
         assert!(targets.is_empty());
     }
 
@@ -78,7 +44,7 @@ mod tests {
     fn target_without_pom_xml_not_detected() {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join("target")).unwrap();
-        let targets = MavenAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(MavenAdapter, dir.path());
         assert!(targets.is_empty());
     }
 
@@ -86,7 +52,7 @@ mod tests {
     fn target_with_pom_xml_detected() {
         let dir = TempDir::new().unwrap();
         make_maven_project(dir.path());
-        let targets = MavenAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(MavenAdapter, dir.path());
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].path, dir.path().join("target"));
         assert_eq!(targets[0].adapter, "maven");
@@ -102,7 +68,7 @@ mod tests {
         make_maven_project(&proj_a);
         make_maven_project(&proj_b);
 
-        let targets = MavenAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(MavenAdapter, dir.path());
         assert_eq!(targets.len(), 2);
         let paths: Vec<_> = targets.iter().map(|t| &t.path).collect();
         assert!(paths.contains(&&proj_a.join("target")));

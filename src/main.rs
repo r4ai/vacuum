@@ -59,8 +59,7 @@ fn run() -> anyhow::Result<()> {
 
         // ── Auto mode: non-interactive scan + delete ─────────────────────────
         Mode::Auto => {
-            let adapters = scanner::build_adapters(&cli);
-            if adapters.is_empty() {
+            if !scanner::ScanConfig::from(&cli).any_enabled() {
                 println!("All adapters are disabled. Nothing to do.");
                 return Ok(());
             }

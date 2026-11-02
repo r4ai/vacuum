@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
+use crate::adapter::{Adapter, CleanTarget, Context, compute_dir_size};
 use crate::adapters::{
     CargoAdapter, GitignoreAdapter, GoAdapter, GradleAdapter, MavenAdapter, NodeAdapter,
     OcamlAdapter, PythonAdapter,
@@ -40,162 +40,49 @@ impl From<&Cli> for ScanConfig {
     }
 }
 
-/// Build the list of enabled adapters from CLI flags.
-pub fn build_adapters(cli: &Cli) -> Vec<Box<dyn Adapter>> {
-    let mut adapters: Vec<Box<dyn Adapter>> = Vec::new();
-
-    if cli.node {
-        adapters.push(Box::new(NodeAdapter));
-    }
-    if cli.cargo {
-        adapters.push(Box::new(CargoAdapter));
-    }
-    if cli.python {
-        adapters.push(Box::new(PythonAdapter));
-    }
-    if cli.go {
-        adapters.push(Box::new(GoAdapter));
-    }
-    if cli.gradle {
-        adapters.push(Box::new(GradleAdapter));
-    }
-    if cli.maven {
-        adapters.push(Box::new(MavenAdapter));
-    }
-    if cli.ocaml {
-        adapters.push(Box::new(OcamlAdapter));
-    }
-    if cli.gitignore {
-        adapters.push(Box::new(GitignoreAdapter));
+impl ScanConfig {
+    /// Whether at least one adapter is enabled.
+    pub fn any_enabled(&self) -> bool {
+        self.gitignore || !self.entry_adapters().is_empty()
     }
 
-    adapters
+    /// The enabled entry-judging adapters, in priority order.
+    /// The gitignore adapter is not included; see [`GitignoreAdapter`].
+    fn entry_adapters(&self) -> Vec<Box<dyn Adapter>> {
+        let all: [(bool, Box<dyn Adapter>); 7] = [
+            (self.node, Box::new(NodeAdapter)),
+            (self.cargo, Box::new(CargoAdapter)),
+            (self.python, Box::new(PythonAdapter)),
+            (self.go, Box::new(GoAdapter)),
+            (self.gradle, Box::new(GradleAdapter)),
+            (self.maven, Box::new(MavenAdapter)),
+            (self.ocaml, Box::new(OcamlAdapter)),
+        ];
+        all.into_iter()
+            .filter_map(|(enabled, adapter)| enabled.then_some(adapter))
+            .collect()
+    }
 }
 
-/// Run all enabled adapters, collect and deduplicate results.
-#[cfg(test)]
-fn scan(root: &Path, adapters: &[Box<dyn Adapter>]) -> anyhow::Result<Vec<CleanTarget>> {
-    let mut all: Vec<CleanTarget> = Vec::new();
-    let mut seen_paths: HashSet<std::path::PathBuf> = HashSet::new();
-
-    for adapter in adapters {
-        match adapter.scan(root) {
-            Ok(targets) => {
-                for target in targets {
-                    if seen_paths.insert(target.path.clone()) {
-                        all.push(target);
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("Warning: adapter '{}' failed: {e}", adapter.name());
-            }
-        }
-    }
-
-    // Sort by path for deterministic, grouped display
-    all.sort_by(|a, b| a.path.cmp(&b.path));
-
-    Ok(all)
-}
-
-const PYTHON_DIR_TARGETS: &[&str] = &["__pycache__", ".venv", "venv", "dist", "build", ".eggs"];
-const PYTHON_CONTEXT_FILES: &[&str] = &[
-    "pyproject.toml",
-    "setup.py",
-    "setup.cfg",
-    "requirements.txt",
-];
-
-fn has_python_context(dir: &Path) -> bool {
-    PYTHON_CONTEXT_FILES.iter().any(|f| dir.join(f).exists())
-}
-
-fn has_gradle_context(dir: &Path) -> bool {
-    dir.join("build.gradle").exists() || dir.join("build.gradle.kts").exists()
-}
-
-fn has_ocaml_context(dir: &Path) -> bool {
-    if dir.join("dune-project").exists() || dir.join("dune-workspace").exists() {
-        return true;
-    }
-
-    dir.read_dir().is_ok_and(|entries| {
-        entries
-            .flatten()
-            .any(|entry| entry.path().extension().is_some_and(|ext| ext == "opam"))
-    })
-}
-
-fn has_python_context_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path) -> bool {
-    if let Some(has_context) = cache.get(dir) {
-        return *has_context;
-    }
-    let has_context = has_python_context(dir);
-    cache.insert(dir.to_path_buf(), has_context);
-    has_context
-}
-
-fn has_gradle_context_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path) -> bool {
-    if let Some(has_context) = cache.get(dir) {
-        return *has_context;
-    }
-    let has_context = has_gradle_context(dir);
-    cache.insert(dir.to_path_buf(), has_context);
-    has_context
-}
-
-fn has_ocaml_context_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path) -> bool {
-    if let Some(has_context) = cache.get(dir) {
-        return *has_context;
-    }
-    let has_context = has_ocaml_context(dir);
-    cache.insert(dir.to_path_buf(), has_context);
-    has_context
-}
-
-fn has_file_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path, name: &str) -> bool {
-    if let Some(has_file) = cache.get(dir) {
-        return *has_file;
-    }
-    let has_file = dir.join(name).exists();
-    cache.insert(dir.to_path_buf(), has_file);
-    has_file
-}
-
-fn has_python_source_file_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path) -> bool {
-    if let Some(has_source) = cache.get(dir) {
-        return *has_source;
-    }
-    let has_source = dir.read_dir().is_ok_and(|mut d| {
-        d.any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "py")))
-    });
-    cache.insert(dir.to_path_buf(), has_source);
-    has_source
-}
-
-/// Whether Python bytecode (`__pycache__/`, `*.pyc`) in `dir` belongs to a
-/// Python project: `dir` or one of its 3 nearest ancestors has a context
-/// file, or `dir` holds a `.py` file.
-fn has_python_bytecode_context_cached(
-    context_cache: &mut HashMap<PathBuf, bool>,
-    source_cache: &mut HashMap<PathBuf, bool>,
-    dir: &Path,
-) -> bool {
-    dir.ancestors()
-        .take(4)
-        .any(|p| has_python_context_cached(context_cache, p))
-        || has_python_source_file_cached(source_cache, dir)
-}
-
-/// Scan enabled adapters with a single directory walk for core adapters.
-/// Gitignore adapter is still executed separately due to matcher semantics.
+/// Scan with the adapters enabled by `cli` and return the sorted targets.
 pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> {
     let cfg = ScanConfig::from(cli);
     let mut all: Vec<CleanTarget> = Vec::new();
     scan_streaming(root, &cfg, &mut |t| all.push(t))?;
     all.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(all)
+}
+
+/// Scan with only `adapter` enabled and return the sorted targets.
+/// Lets adapter unit tests exercise the production walk.
+#[cfg(test)]
+pub fn scan_with(adapter: impl Adapter + 'static, root: &Path) -> Vec<CleanTarget> {
+    let mut all: Vec<CleanTarget> = Vec::new();
+    walk(root, &[Box::new(adapter)], false, false, &mut |t| {
+        all.push(t)
+    });
+    all.sort_by(|a, b| a.path.cmp(&b.path));
+    all
 }
 
 /// Stream discovered targets one-by-one via a callback.
@@ -206,62 +93,54 @@ pub fn scan_streaming(
     cfg: &ScanConfig,
     on_found: &mut dyn FnMut(CleanTarget),
 ) -> anyhow::Result<()> {
-    let core_enabled =
-        cfg.node || cfg.cargo || cfg.python || cfg.go || cfg.gradle || cfg.maven || cfg.ocaml;
-    if !core_enabled && !cfg.gitignore {
-        return Ok(());
-    }
-    if !core_enabled {
-        // Only gitignore is enabled — fall back to the adapter scan path.
-        let gitignore = GitignoreAdapter;
-        match gitignore.scan(root) {
-            Ok(targets) => {
-                for mut target in targets {
-                    if cfg.no_size {
-                        target.size = 0;
-                    }
-                    on_found(target);
-                }
+    walk(
+        root,
+        &cfg.entry_adapters(),
+        cfg.gitignore,
+        cfg.no_size,
+        on_found,
+    );
+    Ok(())
+}
+
+/// Walk `root` once, asking `adapters` about each entry in order.
+fn walk(
+    root: &Path,
+    adapters: &[Box<dyn Adapter>],
+    gitignore: bool,
+    no_size: bool,
+    on_found: &mut dyn FnMut(CleanTarget),
+) {
+    let mut out = Emitter {
+        emitted: HashSet::new(),
+        no_size,
+        on_found,
+    };
+
+    if adapters.is_empty() {
+        // Only gitignore can be enabled — no need for a second walk.
+        if gitignore {
+            for target in scan_gitignore(root) {
+                out.emit(target);
             }
-            Err(e) => eprintln!("Warning: adapter '{}' failed: {e}", gitignore.name()),
         }
-        return Ok(());
+        return;
     }
 
     // Gitignore matches are computed up front so that the walk below can
     // emit whichever of a gitignore match and an adapter match is the
     // ancestor. A target is never emitted together with its descendant.
     let mut ignored: HashMap<PathBuf, CleanTarget> = HashMap::new();
-    if cfg.gitignore {
-        let gitignore = GitignoreAdapter;
-        match gitignore.scan(root) {
-            Ok(targets) => {
-                ignored.extend(targets.into_iter().map(|t| (t.path.clone(), t)));
-            }
-            Err(e) => eprintln!("Warning: adapter '{}' failed: {e}", gitignore.name()),
-        }
+    if gitignore {
+        ignored.extend(
+            scan_gitignore(root)
+                .into_iter()
+                .map(|t| (t.path.clone(), t)),
+        );
     }
 
-    let mut emitted: HashSet<PathBuf> = HashSet::new();
-    let emit = |mut target: CleanTarget,
-                emitted: &mut HashSet<PathBuf>,
-                on_found: &mut dyn FnMut(CleanTarget)| {
-        if emitted.insert(target.path.clone()) {
-            if cfg.no_size {
-                target.size = 0;
-            }
-            on_found(target);
-        }
-    };
+    let mut ctx = Context::default();
     let mut iter = WalkDir::new(root).follow_links(false).into_iter();
-    let mut node_context_cache: HashMap<PathBuf, bool> = HashMap::new();
-    let mut cargo_context_cache: HashMap<PathBuf, bool> = HashMap::new();
-    let mut go_context_cache: HashMap<PathBuf, bool> = HashMap::new();
-    let mut maven_context_cache: HashMap<PathBuf, bool> = HashMap::new();
-    let mut gradle_context_cache: HashMap<PathBuf, bool> = HashMap::new();
-    let mut python_context_cache: HashMap<PathBuf, bool> = HashMap::new();
-    let mut python_source_cache: HashMap<PathBuf, bool> = HashMap::new();
-    let mut ocaml_context_cache: HashMap<PathBuf, bool> = HashMap::new();
 
     while let Some(entry) = iter.next() {
         let entry = match entry {
@@ -269,122 +148,49 @@ pub fn scan_streaming(
             Err(_) => continue,
         };
         let path = entry.path();
+        let Some(parent) = path.parent() else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy();
+        let file_type = entry.file_type();
 
-        if entry.file_type().is_dir() {
-            let name = entry.file_name().to_string_lossy();
-            let parent = match path.parent() {
-                Some(parent) => parent,
-                None => continue,
-            };
-            let mut matched: Option<(&'static str, String)> = None;
-
-            if cfg.node
-                && name == "node_modules"
-                && has_file_cached(&mut node_context_cache, parent, "package.json")
-            {
-                matched = Some(("node", "Node.js dependencies (node_modules/)".into()));
-            }
-            if matched.is_none()
-                && cfg.cargo
-                && name == "target"
-                && has_file_cached(&mut cargo_context_cache, parent, "Cargo.toml")
-            {
-                matched = Some(("cargo", "Cargo build artifacts (target/)".into()));
-            }
-            if matched.is_none() && cfg.python && PYTHON_DIR_TARGETS.contains(&name.as_ref()) {
-                let has_context = if name == "__pycache__" {
-                    has_python_bytecode_context_cached(
-                        &mut python_context_cache,
-                        &mut python_source_cache,
-                        parent,
-                    )
-                } else {
-                    has_python_context_cached(&mut python_context_cache, parent)
-                };
-
-                if has_context {
-                    matched = Some(("python", format!("Python build artifact ({name}/)")));
-                }
-            }
-            if matched.is_none()
-                && cfg.go
-                && name == "vendor"
-                && has_file_cached(&mut go_context_cache, parent, "go.mod")
-            {
-                matched = Some(("go", "Go vendor directory (vendor/)".into()));
-            }
-            if matched.is_none()
-                && cfg.gradle
-                && (name == ".gradle" || name == "build")
-                && has_gradle_context_cached(&mut gradle_context_cache, parent)
-            {
-                matched = Some(("gradle", format!("Gradle build artifact ({name}/)")));
-            }
-            if matched.is_none()
-                && cfg.maven
-                && name == "target"
-                && has_file_cached(&mut maven_context_cache, parent, "pom.xml")
-            {
-                matched = Some(("maven", "Maven build artifacts (target/)".into()));
-            }
-            if matched.is_none()
-                && cfg.ocaml
-                && (name == "_build" || name == "_opam")
-                && has_ocaml_context_cached(&mut ocaml_context_cache, parent)
-            {
-                matched = Some(("ocaml", format!("OCaml build artifact ({name}/)")));
-            }
-
+        if file_type.is_dir() {
+            let matched = adapters.iter().find_map(|a| {
+                a.match_dir(&name, parent, &mut ctx)
+                    .map(|description| (a.name(), description))
+            });
             if let Some((adapter, description)) = matched {
-                let size = if cfg.no_size {
-                    0
-                } else {
-                    compute_dir_size(path)
-                };
-                emit(
-                    CleanTarget {
-                        path: path.to_path_buf(),
-                        adapter,
-                        description,
-                        size,
-                    },
-                    &mut emitted,
-                    on_found,
-                );
+                let size = if no_size { 0 } else { compute_dir_size(path) };
+                out.emit(CleanTarget {
+                    path: path.to_path_buf(),
+                    adapter,
+                    description,
+                    size,
+                });
                 iter.skip_current_dir();
             } else if let Some(target) = ignored.remove(path) {
-                emit(target, &mut emitted, on_found);
+                out.emit(target);
                 iter.skip_current_dir();
             }
-        } else if entry.file_type().is_file() {
-            let name = entry.file_name().to_string_lossy();
-            let is_project_bytecode = cfg.python
-                && name.ends_with(".pyc")
-                && path.parent().is_some_and(|parent| {
-                    has_python_bytecode_context_cached(
-                        &mut python_context_cache,
-                        &mut python_source_cache,
-                        parent,
-                    )
-                });
-            if is_project_bytecode {
-                let size = if cfg.no_size {
+        } else if file_type.is_file() {
+            let matched = adapters.iter().find_map(|a| {
+                a.match_file(&name, parent, &mut ctx)
+                    .map(|description| (a.name(), description))
+            });
+            if let Some((adapter, description)) = matched {
+                let size = if no_size {
                     0
                 } else {
                     entry.metadata().map(|m| m.len()).unwrap_or(0)
                 };
-                emit(
-                    CleanTarget {
-                        path: path.to_path_buf(),
-                        adapter: "python",
-                        description: "Python bytecode (.pyc)".into(),
-                        size,
-                    },
-                    &mut emitted,
-                    on_found,
-                );
+                out.emit(CleanTarget {
+                    path: path.to_path_buf(),
+                    adapter,
+                    description,
+                    size,
+                });
             } else if let Some(target) = ignored.remove(path) {
-                emit(target, &mut emitted, on_found);
+                out.emit(target);
             }
         }
     }
@@ -394,109 +200,49 @@ pub fn scan_streaming(
     let mut rest: Vec<CleanTarget> = ignored.into_values().collect();
     rest.sort_by(|a, b| a.path.cmp(&b.path));
     for target in rest {
-        let covered = target.path.ancestors().any(|a| emitted.contains(a));
-        if !covered {
-            emit(target, &mut emitted, on_found);
+        if !out.covers(&target.path) {
+            out.emit(target);
+        }
+    }
+}
+
+/// Reports each target once and remembers what was reported.
+struct Emitter<'a> {
+    emitted: HashSet<PathBuf>,
+    no_size: bool,
+    on_found: &'a mut dyn FnMut(CleanTarget),
+}
+
+impl Emitter<'_> {
+    fn emit(&mut self, mut target: CleanTarget) {
+        if self.emitted.insert(target.path.clone()) {
+            if self.no_size {
+                target.size = 0;
+            }
+            (self.on_found)(target);
         }
     }
 
-    Ok(())
+    /// Whether `path` or one of its ancestors was already reported.
+    fn covers(&self, path: &Path) -> bool {
+        path.ancestors().any(|a| self.emitted.contains(a))
+    }
+}
+
+/// Run the gitignore adapter, reporting a failure as a warning.
+fn scan_gitignore(root: &Path) -> Vec<CleanTarget> {
+    GitignoreAdapter.scan(root).unwrap_or_else(|e| {
+        eprintln!("Warning: adapter '{}' failed: {e}", GitignoreAdapter::NAME);
+        Vec::new()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapter::{Adapter, CleanTarget};
     use crate::cli::Mode;
     use std::fs;
-    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
-
-    struct FixedAdapter {
-        name: &'static str,
-        targets: Vec<PathBuf>,
-    }
-
-    impl Adapter for FixedAdapter {
-        fn name(&self) -> &'static str {
-            self.name
-        }
-        fn scan(&self, _root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
-            Ok(self
-                .targets
-                .iter()
-                .map(|p| CleanTarget {
-                    path: p.clone(),
-                    adapter: self.name,
-                    description: "test".into(),
-                    size: 0,
-                })
-                .collect())
-        }
-    }
-
-    #[test]
-    fn scan_returns_empty_for_no_adapters() {
-        let adapters: Vec<Box<dyn Adapter>> = vec![];
-        let results = scan(Path::new("/tmp"), &adapters).unwrap();
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn scan_deduplicates_by_path() {
-        let path_a = PathBuf::from("/tmp/vac_test_dedup/a");
-        let path_b = PathBuf::from("/tmp/vac_test_dedup/b");
-
-        let adapter1 = Box::new(FixedAdapter {
-            name: "first",
-            targets: vec![path_a.clone()],
-        }) as Box<dyn Adapter>;
-        let adapter2 = Box::new(FixedAdapter {
-            name: "second",
-            targets: vec![path_a.clone(), path_b.clone()],
-        }) as Box<dyn Adapter>;
-
-        let results = scan(Path::new("/tmp"), &[adapter1, adapter2]).unwrap();
-        assert_eq!(results.len(), 2);
-        assert_eq!(results.iter().filter(|t| t.path == path_a).count(), 1);
-        assert_eq!(results.iter().filter(|t| t.path == path_b).count(), 1);
-    }
-
-    #[test]
-    fn scan_sorts_results_by_path() {
-        let path_z = PathBuf::from("/tmp/vac_test_sort/z");
-        let path_a = PathBuf::from("/tmp/vac_test_sort/a");
-        let path_m = PathBuf::from("/tmp/vac_test_sort/m");
-
-        let adapter = Box::new(FixedAdapter {
-            name: "test",
-            targets: vec![path_z.clone(), path_a.clone(), path_m.clone()],
-        }) as Box<dyn Adapter>;
-
-        let results = scan(Path::new("/tmp"), &[adapter]).unwrap();
-        assert_eq!(results.len(), 3);
-        assert_eq!(results[0].path, path_a);
-        assert_eq!(results[1].path, path_m);
-        assert_eq!(results[2].path, path_z);
-    }
-
-    #[test]
-    fn scan_first_occurrence_wins_on_dedup() {
-        let path = PathBuf::from("/tmp/vac_test_first/x");
-
-        let adapter1 = Box::new(FixedAdapter {
-            name: "first",
-            targets: vec![path.clone()],
-        }) as Box<dyn Adapter>;
-        let adapter2 = Box::new(FixedAdapter {
-            name: "second",
-            targets: vec![path.clone()],
-        }) as Box<dyn Adapter>;
-
-        let results = scan(Path::new("/tmp"), &[adapter1, adapter2]).unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].adapter, "first");
-    }
 
     fn enabled_cli() -> Cli {
         Cli {

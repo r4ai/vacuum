@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// A single item that vacuum has identified as a candidate for deletion.
@@ -13,13 +14,68 @@ pub struct CleanTarget {
     pub size: u64,
 }
 
+/// Cached filesystem lookups shared by all adapters during one scan.
+///
+/// Many candidates share a parent directory, so each lookup is done once.
+#[derive(Default)]
+pub struct Context {
+    files: HashMap<PathBuf, HashMap<&'static str, bool>>,
+    extensions: HashMap<PathBuf, HashMap<&'static str, bool>>,
+}
+
+impl Context {
+    /// Whether `dir` contains an entry named `name`.
+    pub fn has_file(&mut self, dir: &Path, name: &'static str) -> bool {
+        Self::cached(&mut self.files, dir, name, || dir.join(name).exists())
+    }
+
+    /// Whether `dir` contains an entry with the extension `ext` (e.g. `"py"`).
+    pub fn has_extension(&mut self, dir: &Path, ext: &'static str) -> bool {
+        Self::cached(&mut self.extensions, dir, ext, || {
+            dir.read_dir().is_ok_and(|entries| {
+                entries
+                    .flatten()
+                    .any(|entry| entry.path().extension().is_some_and(|e| e == ext))
+            })
+        })
+    }
+
+    fn cached(
+        cache: &mut HashMap<PathBuf, HashMap<&'static str, bool>>,
+        dir: &Path,
+        key: &'static str,
+        compute: impl FnOnce() -> bool,
+    ) -> bool {
+        if let Some(&hit) = cache.get(dir).and_then(|m| m.get(key)) {
+            return hit;
+        }
+        let value = compute();
+        cache
+            .entry(dir.to_path_buf())
+            .or_default()
+            .insert(key, value);
+        value
+    }
+}
+
 /// The contract every cleanup adapter must satisfy.
+///
+/// An adapter only judges single entries. The scanner walks the tree once
+/// and asks each enabled adapter in order; the first match wins and the
+/// walk does not descend into a matched directory.
 pub trait Adapter: Send + Sync {
     /// Short, lowercase identifier used in CLI flags (e.g. `"cargo"`).
     fn name(&self) -> &'static str;
 
-    /// Walk `root` recursively and return all discovered clean targets.
-    fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>>;
+    /// Whether the directory `name` inside `parent` is a target.
+    /// Returns the human-readable description when it is.
+    fn match_dir(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String>;
+
+    /// Whether the regular file `name` inside `parent` is a target.
+    /// Returns the human-readable description when it is.
+    fn match_file(&self, _name: &str, _parent: &Path, _ctx: &mut Context) -> Option<String> {
+        None
+    }
 }
 
 /// Compute the total byte count for a directory tree, best-effort.
@@ -40,6 +96,24 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn context_has_file() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "").unwrap();
+        let mut ctx = Context::default();
+        assert!(ctx.has_file(dir.path(), "Cargo.toml"));
+        assert!(!ctx.has_file(dir.path(), "package.json"));
+    }
+
+    #[test]
+    fn context_has_extension() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("main.py"), "").unwrap();
+        let mut ctx = Context::default();
+        assert!(ctx.has_extension(dir.path(), "py"));
+        assert!(!ctx.has_extension(dir.path(), "opam"));
+    }
 
     #[test]
     fn compute_dir_size_empty_dir() {
