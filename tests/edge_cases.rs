@@ -31,10 +31,12 @@ fn all_adapters_disabled_exits_cleanly() {
             "--js-cache=false",
             "--cargo=false",
             "--python=false",
+            "--python-cache=false",
             "--go=false",
             "--gradle=false",
             "--maven=false",
             "--ocaml=false",
+            "--dotnet=false",
         ])
         .output()
         .unwrap();

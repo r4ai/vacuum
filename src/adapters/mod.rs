@@ -81,6 +81,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         kind: Kind::Entry(&PythonAdapter),
     },
     AdapterSpec {
+        name: "python-cache",
+        label: "Python tools",
+        targets: ".pytest_cache/, .mypy_cache/, .ruff_cache/, .tox/, .nox/, *.egg-info/",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::PYTHON_CACHE),
+    },
+    AdapterSpec {
         name: "go",
         label: "Go",
         targets: "vendor/",
@@ -111,6 +119,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         default_enabled: true,
         is_safe: true,
         kind: Kind::Entry(&OcamlAdapter),
+    },
+    AdapterSpec {
+        name: "dotnet",
+        label: ".NET",
+        targets: "bin/, obj/ next to a *.csproj, *.fsproj or *.vbproj",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::DOTNET),
     },
     AdapterSpec {
         name: GitignoreAdapter::NAME,

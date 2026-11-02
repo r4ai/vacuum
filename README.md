@@ -177,10 +177,12 @@ gitignore = false
 | `--js-cache`  | `.next/`, `.nuxt/`, `.svelte-kit/`, `.turbo/`, `.parcel-cache/`, `.angular/` | on |
 | `--cargo`     | `target/`                                      | on              |
 | `--python`    | `__pycache__/`, `.venv/`, `dist/`, `build/` 等 | on              |
+| `--python-cache` | `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.tox/`, `.nox/`, `*.egg-info/` | on |
 | `--go`        | `vendor/`                                      | on              |
 | `--gradle`    | `.gradle/`, `build/`                           | on              |
 | `--maven`     | `target/`                                      | on              |
 | `--ocaml`     | `_build/`, `_opam/`                            | on              |
+| `--dotnet` | `bin/`, `obj/`（`*.csproj` などと同じ階層） | on |
 | `--gitignore` | `.gitignore` にマッチするファイルすべて        | **off**（危険） |
 
 コンテキストファイル（`package.json`, `Cargo.toml` 等）が存在するディレクトリのみを対象とする。誤検知を防ぐためのガードとして機能する。
