@@ -43,6 +43,93 @@ pub fn print_targets(targets: &[CleanTarget], root: &Path) {
     println!();
 }
 
+/// Print the one-line result of a list or auto run.
+/// `freed` and `removed` are ignored on a dry run.
+pub fn print_summary(
+    targets: &[CleanTarget],
+    freed: u64,
+    removed: usize,
+    dry_run: bool,
+    method: DeleteMethod,
+) {
+    println!("{}", summary_line(targets, freed, removed, dry_run, method));
+}
+
+fn summary_line(
+    targets: &[CleanTarget],
+    freed: u64,
+    removed: usize,
+    dry_run: bool,
+    method: DeleteMethod,
+) -> String {
+    let count = |n: usize| format!("{n} target{}", if n == 1 { "" } else { "s" });
+    if dry_run {
+        let total: u64 = targets.iter().map(|t| t.size).sum();
+        format!(
+            "Would free {} ({})",
+            ByteSize(total).display().si(),
+            count(targets.len())
+        )
+    } else {
+        format!(
+            "{} {} ({})",
+            method.done_label(),
+            ByteSize(freed).display().si(),
+            count(removed)
+        )
+    }
+}
+
+/// Per adapter: name, number of removed targets and their bytes, largest
+/// first. Targets listed in `failed` (by path) were not removed.
+pub fn adapter_breakdown(
+    targets: &[CleanTarget],
+    failed: &[(String, String)],
+) -> Vec<(&'static str, usize, u64)> {
+    let mut rows: Vec<(&'static str, usize, u64)> = Vec::new();
+    for t in targets {
+        let path = t.path.display().to_string();
+        if failed.iter().any(|(p, _)| *p == path) {
+            continue;
+        }
+        match rows.iter_mut().find(|(name, _, _)| *name == t.adapter) {
+            Some(row) => {
+                row.1 += 1;
+                row.2 += t.size;
+            }
+            None => rows.push((t.adapter, 1, t.size)),
+        }
+    }
+    rows.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(b.0)));
+    rows
+}
+
+/// One aligned line per breakdown row.
+fn breakdown_lines(rows: &[(&str, usize, u64)]) -> Vec<String> {
+    let name_width = rows.iter().map(|r| r.0.len()).max().unwrap_or(0);
+    let count_width = rows
+        .iter()
+        .map(|r| r.1.to_string().len())
+        .max()
+        .unwrap_or(0);
+    rows.iter()
+        .map(|(name, count, bytes)| {
+            let noun = if *count == 1 { "item" } else { "items" };
+            format!(
+                "  {name:<name_width$}  {count:>count_width$} {noun:<5}  {}",
+                ByteSize(*bytes).display().si()
+            )
+        })
+        .collect()
+}
+
+/// Print how many targets each adapter removed and how much they held.
+pub fn print_breakdown(targets: &[CleanTarget], failed: &[(String, String)]) {
+    for line in breakdown_lines(&adapter_breakdown(targets, failed)) {
+        println!("{line}");
+    }
+}
+
 pub fn print_cancelled() {
     println!(
         "{}",
@@ -54,6 +141,7 @@ pub fn print_cancelled() {
 pub fn print_final_report(
     freed: u64,
     errors: &[(String, String)],
+    targets: &[CleanTarget],
     dry_run: bool,
     method: DeleteMethod,
 ) {
@@ -75,6 +163,7 @@ pub fn print_final_report(
             .si()
             .if_supports_color(Stream::Stdout, |t| t.green()),
     );
+    print_breakdown(targets, errors);
 
     if !errors.is_empty() {
         println!(
@@ -87,5 +176,45 @@ pub fn print_final_report(
         for (path, err) in errors {
             println!("  {}: {}", path, err);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn target(path: &str, adapter: &'static str, size: u64) -> CleanTarget {
+        CleanTarget {
+            path: PathBuf::from(path),
+            adapter,
+            description: String::new(),
+            size,
+            tracked: false,
+        }
+    }
+
+    #[test]
+    fn breakdown_groups_removed_targets_by_adapter() {
+        let targets = [
+            target("/a/node_modules", "node", 100),
+            target("/b/node_modules", "node", 50),
+            target("/c/target", "cargo", 500),
+            target("/d/target", "cargo", 7),
+        ];
+        let failed = [("/d/target".to_string(), "denied".to_string())];
+
+        let rows = adapter_breakdown(&targets, &failed);
+
+        assert_eq!(rows, vec![("cargo", 1, 500), ("node", 2, 150)]);
+    }
+
+    #[test]
+    fn breakdown_rows_are_aligned() {
+        let rows = [("cargo", 1, 500), ("python", 12, 1_500_000)];
+        assert_eq!(
+            breakdown_lines(&rows),
+            vec!["  cargo    1 item   500 B", "  python  12 items  1.5 MB"]
+        );
     }
 }
