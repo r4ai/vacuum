@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -14,7 +13,7 @@ fn auto_mode_deletes_node_modules() {
         b"// code",
     );
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
@@ -42,7 +41,7 @@ fn dry_run_does_not_delete_node_modules() {
         b"// code",
     );
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--dry-run"])
         .status()
@@ -62,7 +61,7 @@ fn node_adapter_disabled_skips_node_modules() {
     common::make_file(&root.join("package.json"), b"{}");
     common::make_dir(&root.join("node_modules").join("dep"));
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--node=false"])
         .status()
@@ -86,7 +85,7 @@ fn auto_mode_with_no_size_deletes_node_modules() {
         b"// code",
     );
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--no-size"])
         .status()

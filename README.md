@@ -6,6 +6,10 @@ https://github.com/user-attachments/assets/1f263a29-222e-4bf8-9101-e04cb53ac56c
 
 ## インストール
 
+[GitHub Releases](https://github.com/r4ai/vacuum/releases) から、各 OS 向けのビルド済みバイナリを入手できる（Linux x86_64 / aarch64、macOS x86_64 / aarch64、Windows x86_64）。
+
+ソースからビルドする場合:
+
 ```sh
 cargo install --path .
 ```
@@ -28,6 +32,7 @@ safe モードでは、Enter を押すと確認ダイアログが出る。`y` �
 | -------------------- | ---------------------------------------------------------- |
 | `safe`（デフォルト） | 候補を一覧表示し、削除するものをインタラクティブに選択する |
 | `auto`               | 確認なしで全候補を自動削除する                             |
+| `list`               | 候補を一覧表示するだけで、削除しない（端末がなくても使える） |
 
 ```sh
 # インタラクティブに選択して削除
@@ -35,6 +40,9 @@ vacuum ~/projects
 
 # 全候補を自動削除
 vacuum ~/projects --mode auto
+
+# 削除せず候補を一覧表示する（スクリプトや CI でも使える）
+vacuum ~/projects --mode list
 
 # 削除せず候補を確認する
 vacuum ~/projects --dry-run
@@ -88,6 +96,72 @@ vacuum ~/projects --min-size 100MB
 
 - `--max-depth <N>`: スキャンルートから N 階層までしか走査しない。ルート直下が 1 階層目。
 - `--one-file-system`: 別のファイルシステム（マウントポイント）に入らない。ネットワークドライブや外部ディスクを誤って走査するのを防ぐ。
+
+### JSON で出力する
+
+list モードか auto モードで `--json` を付けると、候補と削除結果を JSON で標準出力に出す。list モードでは削除しないので、`dry_run` は常に `true` になる。`jq` での集計や、ほかのツールとの連携に使う。
+
+```sh
+vacuum ~/projects --mode list --json | jq '.total_size'
+```
+
+```json
+{
+  "targets": [
+    { "path": "/home/u/projects/app/node_modules", "adapter": "node",
+      "description": "Node.js dependencies (node_modules/)", "size": 1234, "tracked": false }
+  ],
+  "total_size": 1234,
+  "result": { "dry_run": true, "method": "remove", "freed": 0, "trashed": 0, "errors": [] }
+}
+```
+
+`--trash` のときは、ゴミ箱に移した量を `freed` ではなく `trashed` に入れる。ゴミ箱の中身はディスクを使い続けるため。
+
+### 出力量を調整する
+
+- `--quiet`（`-q`）: list モードと auto モードで、エラーと最終結果の 1 行だけを出す。cron などで使う。
+- `--verbose`（`-v`）: list モードと auto モードで、絞り込み（除外、git 管理、期間、サイズ、マウント）で外した候補と、その理由を標準エラーに出す。誤検知を調べるときに使う。
+
+```sh
+$ vacuum ~/projects --mode auto --quiet
+Freed 1.2 GB (42 targets)
+```
+
+### 最終レポート
+
+削除後のレポートには、アダプターごとの件数と解放量も出す。
+
+```
+Freed 12.3 GB (64 targets)
+  node    42 items  8.1 GB
+  cargo    7 items  3.9 GB
+  python  15 items  300.0 MB
+```
+
+### 設定ファイル
+
+`~/.config/vacuum/config.toml`（`$XDG_CONFIG_HOME` があれば `$XDG_CONFIG_HOME/vacuum/config.toml`）に既定値を書ける。
+コマンドラインで指定したフラグは、設定ファイルより優先する。`exclude` だけは `--exclude` に追加される。
+
+```toml
+mode = "safe"              # safe / auto / list
+exclude = ["~/work/important/**", "*.venv"]
+no_size = false
+include_tracked = false
+trash = true
+one_file_system = true
+max_depth = 6
+min_size = "100MB"
+older_than = "30d"
+
+[adapters]
+go = false
+gitignore = false
+```
+
+`~/` で始まる除外パターンは、ホームディレクトリからの絶対パスとして扱う。それ以外は `--exclude` と同じく、スキャンルートからの相対パスとして扱う。
+未知のキーやアダプター名はエラーになる。
 
 ### 終了コード
 
@@ -215,6 +289,16 @@ hyperfine --warmup 3 \
 - 生成するツリーは決定的で、同じ引数なら毎回同じになる。
 - 変更前後を比べるときは、それぞれのバイナリを別名でコピーし、1 回の `hyperfine` で並べて計測する。
 - 上の手順はページキャッシュが温まった状態を測る。コールドキャッシュを測るなら、Linux では `--prepare 'sync; echo 3 | sudo tee /proc/sys/vm/drop_caches'` を付ける。
+
+### リリース
+
+`v0.2.0` のようなタグを push すると、`.github/workflows/release.yml` が各 OS 向けにビルドし、GitHub Release を作ってアーカイブと `SHA256SUMS` を添付する。
+タグを打つ前に、`Cargo.toml` の `version` をタグと合わせる。
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
 
 ### アダプターの追加
 
