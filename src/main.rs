@@ -54,8 +54,18 @@ fn run() -> anyhow::Result<()> {
         // ── Safe mode: full TUI workflow ──────────────────────────────────────
         Mode::Safe => match interactive::run_tui_flow(&roots, &cli)? {
             TuiResult::Cancelled => display::print_cancelled(),
-            TuiResult::Completed { freed, errors } => {
-                display::print_final_report(freed, &errors, cli.dry_run, cli.delete_method());
+            TuiResult::Completed {
+                freed,
+                errors,
+                targets,
+            } => {
+                display::print_final_report(
+                    freed,
+                    &errors,
+                    &targets,
+                    cli.dry_run,
+                    cli.delete_method(),
+                );
                 if !errors.is_empty() {
                     anyhow::bail!("failed to delete {} target(s)", errors.len());
                 }
@@ -109,6 +119,9 @@ fn run() -> anyhow::Result<()> {
             let report = cleaner::delete_targets(&targets, cli.dry_run, method, cli.quiet);
             let removed = targets.len() - report.errors.len();
             display::print_summary(&targets, report.freed, removed, cli.dry_run, method);
+            if !cli.quiet {
+                display::print_breakdown(&targets, &report.errors);
+            }
             if !report.errors.is_empty() {
                 anyhow::bail!("failed to delete {} target(s)", report.errors.len());
             }

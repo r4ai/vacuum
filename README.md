@@ -122,6 +122,17 @@ $ vacuum ~/projects --mode auto --quiet
 Freed 1.2 GB (42 targets)
 ```
 
+### 最終レポート
+
+削除後のレポートには、アダプターごとの件数と解放量も出す。
+
+```
+Freed 12.3 GB (64 targets)
+  node    42 items  8.1 GB
+  cargo    7 items  3.9 GB
+  python  15 items  300.0 MB
+```
+
 ### 終了コード
 
 削除に 1 件でも失敗すると、終了コード 1 で終わる。スクリプトや CI から失敗を検知できる。
