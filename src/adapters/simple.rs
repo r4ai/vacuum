@@ -21,12 +21,13 @@ pub struct Rule {
 }
 
 impl Rule {
-    /// The project directory of a match, or `None` when `name` in
-    /// `parent` does not match this rule.
-    fn project<'p>(&self, name: &str, parent: &'p Path) -> Option<&'p Path> {
+    /// The project directory of each pattern that matches `name` in
+    /// `parent`. Several can match: `target` and `project/target` both
+    /// match a `target` directory, with different projects.
+    fn projects<'p>(&self, name: &str, parent: &'p Path) -> impl Iterator<Item = &'p Path> {
         self.dirs
             .iter()
-            .find_map(|pattern| match pattern.split_once('/') {
+            .filter_map(move |pattern| match pattern.split_once('/') {
                 Some((outer, inner)) => (inner == name
                     && parent.file_name().is_some_and(|n| n == outer))
                 .then(|| parent.parent())
@@ -65,15 +66,17 @@ impl Adapter for SimpleAdapter {
     }
 
     fn match_dir(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String> {
-        self.rules.iter().find_map(|rule| {
+        let matched = self.rules.iter().any(|rule| {
             // The name check comes first so that unrelated directories
             // cost no I/O.
-            let project = rule.project(name, parent)?;
-            let target = parent.join(name);
-            (rule.has_context(project, ctx)
-                && !rule.unless_inside.iter().any(|f| target.join(f).exists()))
-            .then(|| format!("{} ({name}/)", self.label))
-        })
+            rule.projects(name, parent)
+                .any(|project| rule.has_context(project, ctx))
+                && !rule
+                    .unless_inside
+                    .iter()
+                    .any(|f| parent.join(name).join(f).exists())
+        });
+        matched.then(|| format!("{} ({name}/)", self.label))
     }
 }
 
@@ -202,6 +205,28 @@ pub static PHP: SimpleAdapter = SimpleAdapter {
     }],
 };
 
+/// Bundler gems installed into the project. `.bundle/` is kept: its `config` holds user settings.
+pub static RUBY: SimpleAdapter = SimpleAdapter {
+    name: "ruby",
+    label: "Bundler gems",
+    rules: &[Rule {
+        dirs: &["vendor/bundle"],
+        context: &["Gemfile"],
+        unless_inside: &[],
+    }],
+};
+
+/// sbt build output, including the build definition's own.
+pub static SCALA: SimpleAdapter = SimpleAdapter {
+    name: "scala",
+    label: "sbt build output",
+    rules: &[Rule {
+        dirs: &["target", "project/target"],
+        context: &["build.sbt"],
+        unless_inside: &[],
+    }],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +293,27 @@ mod tests {
         fs::create_dir_all(dir.path().join("other").join("bundle")).unwrap();
         let expected = Path::new("vendor").join("bundle").display().to_string();
         assert_eq!(found(dir.path()), vec![expected]);
+    }
+
+    /// `target` and `project/target` in one rule: the nested pattern must
+    /// still match when the plain one finds no context.
+    #[test]
+    fn every_matching_pattern_is_tried() {
+        const NESTED: SimpleAdapter = SimpleAdapter {
+            name: "nested",
+            label: "Nested",
+            rules: &[Rule {
+                dirs: &["target", "project/target"],
+                context: &["build.sbt"],
+                unless_inside: &[],
+            }],
+        };
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("build.sbt"), "").unwrap();
+        fs::create_dir_all(dir.path().join("project").join("target")).unwrap();
+        let targets = scan_with(NESTED, dir.path());
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].path, dir.path().join("project").join("target"));
     }
 
     #[test]
