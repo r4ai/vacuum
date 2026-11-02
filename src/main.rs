@@ -1,4 +1,4 @@
-use clap::{CommandFactory as _, Parser as _};
+use clap::{CommandFactory as _, FromArgMatches as _};
 use std::process::ExitCode;
 
 mod adapter;
@@ -6,9 +6,11 @@ mod adapters;
 mod age;
 mod cleaner;
 mod cli;
+mod config;
 mod display;
 mod exclude;
 mod interactive;
+mod report;
 mod roots;
 mod scanner;
 mod tracked;
@@ -29,13 +31,21 @@ fn main() -> ExitCode {
 }
 
 fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    if let Some(config) = config::Config::load()? {
+        config.apply(&mut cli, &matches)?;
+    }
 
     // Shell completion generation — exits immediately
     if let Some(shell) = cli.generate_completions {
         let mut cmd = Cli::command();
         clap_complete::generate(shell, &mut cmd, "vacuum", &mut std::io::stdout());
         return Ok(());
+    }
+
+    if cli.json && cli.mode == Mode::Safe {
+        anyhow::bail!("--json needs --mode list or --mode auto");
     }
 
     let roots = roots::Roots::resolve(&cli.paths)?;
@@ -49,13 +59,51 @@ fn run() -> anyhow::Result<()> {
         // ── Safe mode: full TUI workflow ──────────────────────────────────────
         Mode::Safe => match interactive::run_tui_flow(&roots, &cli)? {
             TuiResult::Cancelled => display::print_cancelled(),
-            TuiResult::Completed { freed, errors } => {
-                display::print_final_report(freed, &errors, cli.dry_run, cli.delete_method());
+            TuiResult::Completed {
+                freed,
+                errors,
+                targets,
+            } => {
+                display::print_final_report(
+                    freed,
+                    &errors,
+                    &targets,
+                    cli.dry_run,
+                    cli.delete_method(),
+                );
                 if !errors.is_empty() {
                     anyhow::bail!("failed to delete {} target(s)", errors.len());
                 }
             }
         },
+
+        // ── JSON output: list mode or auto mode ──────────────────────────────
+        Mode::List | Mode::Auto if cli.json => {
+            let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
+            let dry_run = cli.dry_run || cli.mode == Mode::List;
+            let outcome = if dry_run {
+                cleaner::DeleteReport::default()
+            } else {
+                cleaner::remove_all(&targets, cli.delete_method(), |_| {})
+            };
+            println!(
+                "{}",
+                report::to_json(&targets, &outcome, dry_run, cli.delete_method())
+            );
+            if !outcome.errors.is_empty() {
+                anyhow::bail!("failed to delete {} target(s)", outcome.errors.len());
+            }
+        }
+
+        // ── List mode: print the targets, never delete ───────────────────────
+        Mode::List => {
+            let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
+            if cli.quiet {
+                display::print_summary(&targets, 0, 0, true, cli.delete_method());
+            } else {
+                display::print_targets(&targets, &roots.base);
+            }
+        }
 
         // ── Auto mode: non-interactive scan + delete ─────────────────────────
         Mode::Auto => {
@@ -64,18 +112,27 @@ fn run() -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            let names: Vec<String> = roots.dirs.iter().map(|d| d.display().to_string()).collect();
-            eprintln!("Scanning {} ...", names.join(", "));
+            if !cli.quiet {
+                let names: Vec<String> =
+                    roots.dirs.iter().map(|d| d.display().to_string()).collect();
+                eprintln!("Scanning {} ...", names.join(", "));
+            }
             let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
 
-            display::print_targets(&targets, &roots.base);
-
-            if targets.is_empty() {
-                return Ok(());
+            if !cli.quiet {
+                display::print_targets(&targets, &roots.base);
             }
 
-            let dry_run = cli.dry_run;
-            cleaner::delete_targets(&targets, dry_run, cli.delete_method())?;
+            let method = cli.delete_method();
+            let report = cleaner::delete_targets(&targets, cli.dry_run, method, cli.quiet);
+            let removed = targets.len() - report.errors.len();
+            display::print_summary(&targets, report.freed, removed, cli.dry_run, method);
+            if !cli.quiet {
+                display::print_breakdown(&targets, &report.errors);
+            }
+            if !report.errors.is_empty() {
+                anyhow::bail!("failed to delete {} target(s)", report.errors.len());
+            }
         }
     }
 
