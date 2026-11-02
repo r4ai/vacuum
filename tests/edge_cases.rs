@@ -36,6 +36,7 @@ fn all_adapters_disabled_exits_cleanly() {
             "--gradle=false",
             "--maven=false",
             "--ocaml=false",
+            "--dotnet=false",
         ])
         .output()
         .unwrap();

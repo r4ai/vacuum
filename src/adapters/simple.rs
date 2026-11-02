@@ -118,6 +118,17 @@ pub static PYTHON_CACHE: SimpleAdapter = SimpleAdapter {
     }],
 };
 
+/// .NET build output next to a project file.
+pub static DOTNET: SimpleAdapter = SimpleAdapter {
+    name: "dotnet",
+    label: ".NET build output",
+    rules: &[Rule {
+        dirs: &["bin", "obj"],
+        context: &["*.csproj", "*.fsproj", "*.vbproj"],
+        unless_inside: &[],
+    }],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
