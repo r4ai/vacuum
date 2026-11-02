@@ -3,7 +3,7 @@
 use serde::Serialize;
 
 use crate::adapter::CleanTarget;
-use crate::cleaner::DeleteReport;
+use crate::cleaner::{DeleteMethod, DeleteReport};
 
 #[derive(Serialize)]
 struct Report<'a> {
@@ -28,8 +28,12 @@ struct Target<'a> {
 #[derive(Serialize)]
 struct Outcome<'a> {
     dry_run: bool,
-    /// Bytes of the targets removed; 0 on a dry run.
+    /// `"remove"` (permanently) or `"trash"` (`--trash`).
+    method: &'static str,
+    /// Bytes deleted permanently; 0 on a dry run or with `--trash`.
     freed: u64,
+    /// Bytes moved to the trash; they still occupy disk space.
+    trashed: u64,
     errors: Vec<Error<'a>>,
 }
 
@@ -40,7 +44,16 @@ struct Error<'a> {
 }
 
 /// The JSON document for `targets` and the outcome of deleting them.
-pub fn to_json(targets: &[CleanTarget], outcome: &DeleteReport, dry_run: bool) -> String {
+pub fn to_json(
+    targets: &[CleanTarget],
+    outcome: &DeleteReport,
+    dry_run: bool,
+    method: DeleteMethod,
+) -> String {
+    let (method_name, freed, trashed) = match method {
+        DeleteMethod::Remove => ("remove", outcome.freed, 0),
+        DeleteMethod::Trash => ("trash", 0, outcome.freed),
+    };
     let report = Report {
         targets: targets
             .iter()
@@ -55,7 +68,9 @@ pub fn to_json(targets: &[CleanTarget], outcome: &DeleteReport, dry_run: bool) -
         total_size: targets.iter().map(|t| t.size).sum(),
         result: Outcome {
             dry_run,
-            freed: outcome.freed,
+            method: method_name,
+            freed,
+            trashed,
             errors: outcome
                 .errors
                 .iter()

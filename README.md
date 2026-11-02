@@ -104,9 +104,11 @@ vacuum ~/projects --mode auto --dry-run --json | jq '.total_size'
       "description": "Node.js dependencies (node_modules/)", "size": 1234, "tracked": false }
   ],
   "total_size": 1234,
-  "result": { "dry_run": true, "freed": 0, "errors": [] }
+  "result": { "dry_run": true, "method": "remove", "freed": 0, "trashed": 0, "errors": [] }
 }
 ```
+
+`--trash` のときは、ゴミ箱に移した量を `freed` ではなく `trashed` に入れる。ゴミ箱の中身はディスクを使い続けるため。
 
 ### 終了コード
 
