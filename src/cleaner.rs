@@ -16,6 +16,17 @@ pub enum DeleteMethod {
     Trash,
 }
 
+impl DeleteMethod {
+    /// How to report the bytes handled. Trashed bytes still occupy disk
+    /// space, so they are not reported as freed.
+    pub fn done_label(self) -> &'static str {
+        match self {
+            DeleteMethod::Remove => "Freed",
+            DeleteMethod::Trash => "Moved to trash",
+        }
+    }
+}
+
 /// Remove one target with `method`.
 fn remove(target: &CleanTarget, method: DeleteMethod) -> anyhow::Result<()> {
     let path = &target.path;
@@ -129,7 +140,11 @@ pub fn delete_targets(
         pb.inc(1);
     }
 
-    pb.finish_with_message(format!("Done. Freed {}", ByteSize(freed).display().si()));
+    pb.finish_with_message(format!(
+        "Done. {} {}",
+        method.done_label(),
+        ByteSize(freed).display().si()
+    ));
 
     if !errors.is_empty() {
         eprintln!("\nErrors during deletion:");
@@ -173,5 +188,16 @@ mod tests {
         };
         assert!(delete_targets(&[target], false, DeleteMethod::Remove).is_ok());
         assert!(!path.exists());
+    }
+}
+
+#[cfg(test)]
+mod method_tests {
+    use super::*;
+
+    #[test]
+    fn trash_is_not_reported_as_freed() {
+        assert_eq!(DeleteMethod::Remove.done_label(), "Freed");
+        assert_eq!(DeleteMethod::Trash.done_label(), "Moved to trash");
     }
 }

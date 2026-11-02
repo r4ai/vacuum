@@ -50,7 +50,7 @@ fn run() -> anyhow::Result<()> {
         Mode::Safe => match interactive::run_tui_flow(&root, &cli)? {
             TuiResult::Cancelled => display::print_cancelled(),
             TuiResult::Completed { freed, errors } => {
-                display::print_final_report(freed, &errors, cli.dry_run);
+                display::print_final_report(freed, &errors, cli.dry_run, cli.delete_method());
                 if !errors.is_empty() {
                     anyhow::bail!("failed to delete {} target(s)", errors.len());
                 }

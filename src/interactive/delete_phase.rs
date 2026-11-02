@@ -22,6 +22,7 @@ pub struct DeletingState {
     pub finished: bool,
     pub start: Instant,
     pub dry_run: bool,
+    pub method: DeleteMethod,
 }
 
 impl DeletingState {
@@ -42,6 +43,7 @@ impl DeletingState {
             finished: false,
             start: Instant::now(),
             dry_run,
+            method,
         }
     }
 
@@ -155,7 +157,7 @@ fn render_delete_body(frame: &mut ratatui::Frame, state: &DeletingState, area: R
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw(format!("  freed: {freed_str}")),
+            Span::raw(format!("  {}: {freed_str}", state.method.done_label())),
             if state.errors.is_empty() {
                 Span::raw(String::new())
             } else {
@@ -167,7 +169,11 @@ fn render_delete_body(frame: &mut ratatui::Frame, state: &DeletingState, area: R
         ])
     } else {
         Line::from(vec![
-            Span::raw(format!("  {:.1}s  freed: {freed_str}", elapsed)),
+            Span::raw(format!(
+                "  {:.1}s  {}: {freed_str}",
+                elapsed,
+                state.method.done_label()
+            )),
             if !state.errors.is_empty() {
                 Span::styled(
                     format!("  {} error(s)", state.errors.len()),
