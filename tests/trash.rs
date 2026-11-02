@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 /// On Linux the trash lives in `$XDG_DATA_HOME/Trash`, so the test can
@@ -15,7 +14,7 @@ fn trash_moves_targets_to_the_trash() {
     common::make_file(&root.join("node_modules").join("a.js"), b"x");
     common::make_dir(&data_home);
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(&root)
         .args(["--mode", "auto", "--trash"])
         .env("XDG_DATA_HOME", &data_home)
@@ -43,7 +42,7 @@ fn trash_with_dry_run_keeps_targets() {
     common::make_file(&root.join("package.json"), b"{}");
     common::make_file(&root.join("node_modules").join("a.js"), b"x");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--trash", "--dry-run"])
         .status()

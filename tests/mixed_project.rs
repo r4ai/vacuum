@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -35,7 +34,7 @@ fn auto_mode_handles_mixed_project() {
         b"binary",
     );
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
@@ -62,7 +61,7 @@ fn auto_mode_handles_mixed_project() {
 
 /// Run vacuum in auto + dry-run mode with gitignore enabled; return stdout.
 fn dry_run_with_gitignore(root: &std::path::Path) -> String {
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--gitignore", "--dry-run", "--no-size"])
         .output()
@@ -119,7 +118,7 @@ fn nested_targets_are_deleted_without_errors() {
         b"",
     );
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--gitignore"])
         .output()
@@ -140,7 +139,7 @@ fn auto_mode_reports_a_breakdown_by_adapter() {
     common::make_file(&root.join("api").join("Cargo.toml"), b"[package]");
     common::make_file(&root.join("api").join("target").join("app"), b"1234567");
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .output()

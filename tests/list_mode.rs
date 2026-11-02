@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 fn node_project(root: &std::path::Path) {
@@ -14,7 +13,7 @@ fn list_mode_prints_targets_without_deleting() {
     let root = dir.path();
     node_project(root);
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "list"])
         .output()
@@ -33,7 +32,7 @@ fn list_mode_supports_json() {
     let root = dir.path();
     node_project(root);
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "list", "--json"])
         .output()
@@ -49,10 +48,7 @@ fn list_mode_supports_json() {
 #[test]
 fn safe_mode_without_terminal_suggests_list_mode() {
     let dir = TempDir::new().unwrap();
-    let output = Command::new(common::vacuum_bin())
-        .arg(dir.path())
-        .output()
-        .unwrap();
+    let output = common::vacuum().arg(dir.path()).output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("--mode list"), "{stderr}");
 }

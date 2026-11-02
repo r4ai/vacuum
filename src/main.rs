@@ -1,4 +1,4 @@
-use clap::{CommandFactory as _, Parser as _};
+use clap::{CommandFactory as _, FromArgMatches as _};
 use std::process::ExitCode;
 
 mod adapter;
@@ -6,6 +6,7 @@ mod adapters;
 mod age;
 mod cleaner;
 mod cli;
+mod config;
 mod display;
 mod exclude;
 mod interactive;
@@ -30,7 +31,11 @@ fn main() -> ExitCode {
 }
 
 fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let matches = Cli::command().get_matches();
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    if let Some(config) = config::Config::load()? {
+        config.apply(&mut cli, &matches)?;
+    }
 
     // Shell completion generation — exits immediately
     if let Some(shell) = cli.generate_completions {

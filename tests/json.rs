@@ -1,10 +1,9 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 fn json(args: &[&str], root: &std::path::Path) -> serde_json::Value {
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--json"])
         .args(args)
@@ -75,7 +74,7 @@ fn json_with_no_targets_is_still_json() {
 #[test]
 fn json_requires_auto_mode() {
     let dir = TempDir::new().unwrap();
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(dir.path())
         .arg("--json")
         .output()
@@ -94,7 +93,7 @@ fn json_reports_trashed_bytes_apart_from_freed_bytes() {
     let data_home = dir.path().join("data");
     std::fs::create_dir_all(&data_home).unwrap();
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(&root)
         .args(["--mode", "auto", "--json", "--trash"])
         .env("XDG_DATA_HOME", &data_home)

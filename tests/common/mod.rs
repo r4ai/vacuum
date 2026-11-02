@@ -8,6 +8,13 @@ pub fn vacuum_bin() -> &'static str {
     env!("CARGO_BIN_EXE_vacuum")
 }
 
+/// A command that runs vacuum without the developer's config file.
+pub fn vacuum() -> Command {
+    let mut command = Command::new(vacuum_bin());
+    command.env("XDG_CONFIG_HOME", "/nonexistent/vacuum-test-config");
+    command
+}
+
 pub fn make_file(path: &Path, content: &[u8]) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
