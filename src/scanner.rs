@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::adapter::{Adapter, CleanTarget, Context, WalkLimits, dir_stats};
+use crate::adapter::{Adapter, CleanTarget, Context, DirStats, WalkLimits, dir_stats};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::age::AgeIndex;
 use crate::cli::Cli;
@@ -192,7 +192,7 @@ fn walk(
         });
         for found in rx {
             match found {
-                Found::Adapter(target, nested) => out.emit(target, Some(nested)),
+                Found::Adapter(target, stats) => out.emit(target, Some(stats)),
                 Found::Unsized(target) => out.emit(target, None),
                 Found::Ignored(path) => {
                     if let Some(target) = ignored.remove(&path) {
@@ -216,9 +216,9 @@ fn walk(
 
 /// A match found by a worker thread of [`walk_parallel`].
 enum Found {
-    /// An adapter matched the entry. Also carries the repository roots
-    /// at or below it (see [`dir_stats`]).
-    Adapter(CleanTarget, Vec<PathBuf>),
+    /// An adapter matched the entry. Also carries what a walk of its tree
+    /// learned (see [`dir_stats`]).
+    Adapter(CleanTarget, DirStats),
     /// An adapter matched a directory whose size is not computed yet.
     /// Never sent through the channel.
     Unsized(CleanTarget),
@@ -238,6 +238,7 @@ fn walk_parallel(
     tx: mpsc::Sender<Found>,
 ) {
     let excludes = &filters.excludes;
+    let one_file_system = filters.limits.one_file_system;
     WalkBuilder::new(root)
         .standard_filters(false)
         .follow_links(false)
@@ -258,9 +259,9 @@ fn walk_parallel(
                         let tx = tx.clone();
                         sizes.spawn(move |_| {
                             // One walk yields the size and nested repositories.
-                            let stats = dir_stats(&target.path, !no_size);
+                            let stats = dir_stats(&target.path, !no_size, one_file_system);
                             target.size = stats.size;
-                            let _ = tx.send(Found::Adapter(target, stats.repos));
+                            let _ = tx.send(Found::Adapter(target, stats));
                         });
                         None
                     }
@@ -328,7 +329,7 @@ fn judge(
         } else {
             target.size = entry.metadata().map(|m| m.len()).unwrap_or(0);
             // A file holds no repository.
-            (skip, Some(Found::Adapter(target, Vec::new())))
+            (skip, Some(Found::Adapter(target, DirStats::default())))
         }
     } else if ignored.contains(path) {
         (skip, Some(Found::Ignored(path.to_path_buf())))
@@ -364,8 +365,8 @@ impl Emitter<'_> {
     /// Report `target`, unless it was reported already, is excluded, or
     /// contains tracked files that are not wanted. The checks here also
     /// cover gitignore matches.
-    /// `nested` are the repository roots at or below the target, if known.
-    fn emit(&mut self, mut target: CleanTarget, nested: Option<Vec<PathBuf>>) {
+    /// `stats` describe the target's tree, if already known.
+    fn emit(&mut self, mut target: CleanTarget, stats: Option<DirStats>) {
         // A directory is deleted as a whole, so it must not hold an
         // excluded path either.
         let is_dir = target.path.is_dir();
@@ -382,7 +383,17 @@ impl Emitter<'_> {
         {
             return;
         }
-        target.tracked = self.tracked.is_tracked(&target.path, nested.as_deref());
+        let one_file_system = self.filters.limits.one_file_system;
+        let stats = match stats {
+            Some(stats) => stats,
+            None if is_dir => dir_stats(&target.path, false, one_file_system),
+            None => DirStats::default(),
+        };
+        // Deleting the target would delete files on another file system.
+        if one_file_system && stats.crosses_mount {
+            return;
+        }
+        target.tracked = self.tracked.is_tracked(&target.path, Some(&stats.repos));
         if target.tracked && !self.filters.include_tracked {
             return;
         }

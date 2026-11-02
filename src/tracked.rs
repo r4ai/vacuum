@@ -29,7 +29,7 @@ impl TrackedIndex {
             Some(nested) => nested,
             None => {
                 found = if path.is_dir() {
-                    dir_stats(path, false).repos
+                    dir_stats(path, false, false).repos
                 } else {
                     Vec::new()
                 };
