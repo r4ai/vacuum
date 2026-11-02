@@ -88,7 +88,7 @@ fn json_reports_trashed_bytes_apart_from_freed_bytes() {
     let data_home = dir.path().join("data");
     std::fs::create_dir_all(&data_home).unwrap();
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(&root)
         .args(["--mode", "auto", "--json", "--trash"])
         .env("XDG_DATA_HOME", &data_home)
