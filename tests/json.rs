@@ -1,10 +1,9 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 fn json(args: &[&str], root: &std::path::Path) -> serde_json::Value {
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--json"])
         .args(args)
@@ -70,7 +69,7 @@ fn json_with_no_targets_is_still_json() {
 #[test]
 fn json_requires_auto_mode() {
     let dir = TempDir::new().unwrap();
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(dir.path())
         .arg("--json")
         .output()

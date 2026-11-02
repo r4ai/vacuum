@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -14,7 +13,7 @@ fn auto_mode_deletes_cargo_target() {
     common::make_dir(&root.join("target").join("debug"));
     common::make_file(&root.join("target").join("debug").join("app"), b"binary");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()

@@ -25,8 +25,11 @@ impl Excludes {
             return Err(e).with_context(|| format!("Invalid {}", file.display()));
         }
         for pattern in patterns {
+            let Some(pattern) = anchor_home(pattern, root) else {
+                continue;
+            };
             builder
-                .add_line(None, pattern)
+                .add_line(None, &pattern)
                 .with_context(|| format!("Invalid --exclude pattern: {pattern}"))?;
         }
         Ok(Self {
@@ -71,6 +74,20 @@ impl Excludes {
             .filter_map(|e| e.ok())
             .any(|e| self.is_excluded(e.path(), e.file_type().is_dir()))
     }
+}
+
+/// Turn a `~/...` pattern into one anchored at `root`: `~/p/keep` with
+/// root `~/p` becomes `/keep`. `None` when the path is not under `root`,
+/// so the pattern cannot match there. Other patterns are kept as they are.
+fn anchor_home(pattern: &str, root: &Path) -> Option<String> {
+    let Some(rest) = pattern.strip_prefix("~/") else {
+        return Some(pattern.to_string());
+    };
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let home = home.canonicalize().unwrap_or(home);
+    let relative = home.join(rest);
+    let relative = relative.strip_prefix(root).ok()?;
+    Some(format!("/{}", relative.display()))
 }
 
 #[cfg(test)]

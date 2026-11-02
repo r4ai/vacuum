@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -14,7 +13,7 @@ fn dry_run_shows_sizes_in_si_units() {
         &vec![0u8; 1_500_000],
     );
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--dry-run"])
         .output()

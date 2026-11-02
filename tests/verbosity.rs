@@ -1,7 +1,7 @@
 mod common;
 
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 use tempfile::TempDir;
 
 fn node_project(root: &Path) {
@@ -10,11 +10,7 @@ fn node_project(root: &Path) {
 }
 
 fn vacuum(root: &Path, args: &[&str]) -> Output {
-    let output = Command::new(common::vacuum_bin())
-        .arg(root)
-        .args(args)
-        .output()
-        .unwrap();
+    let output = common::vacuum().arg(root).args(args).output().unwrap();
     assert!(
         output.status.success(),
         "stderr: {}",
@@ -79,7 +75,7 @@ fn verbose_explains_skipped_targets() {
 #[test]
 fn quiet_and_verbose_conflict() {
     let dir = TempDir::new().unwrap();
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(dir.path())
         .args(["--mode", "list", "--quiet", "--verbose"])
         .output()

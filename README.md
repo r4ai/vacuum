@@ -133,6 +133,30 @@ Freed 12.3 GB (64 targets)
   python  15 items  300.0 MB
 ```
 
+### 設定ファイル
+
+`~/.config/vacuum/config.toml`（`$XDG_CONFIG_HOME` があれば `$XDG_CONFIG_HOME/vacuum/config.toml`）に既定値を書ける。
+コマンドラインで指定したフラグは、設定ファイルより優先する。`exclude` だけは `--exclude` に追加される。
+
+```toml
+mode = "safe"              # safe / auto / list
+exclude = ["~/work/important/**", "*.venv"]
+no_size = false
+include_tracked = false
+trash = true
+one_file_system = true
+max_depth = 6
+min_size = "100MB"
+older_than = "30d"
+
+[adapters]
+go = false
+gitignore = false
+```
+
+`~/` で始まる除外パターンは、ホームディレクトリからの絶対パスとして扱う。それ以外は `--exclude` と同じく、スキャンルートからの相対パスとして扱う。
+未知のキーやアダプター名はエラーになる。
+
 ### 終了コード
 
 削除に 1 件でも失敗すると、終了コード 1 で終わる。スクリプトや CI から失敗を検知できる。

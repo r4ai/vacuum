@@ -1,7 +1,6 @@
 mod common;
 
 use std::path::Path;
-use std::process::Command;
 use tempfile::TempDir;
 
 fn node_project(dir: &Path) {
@@ -19,7 +18,7 @@ fn multiple_paths_are_all_scanned() {
         node_project(p);
     }
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .args([&work, &oss])
         .args(["--mode", "auto"])
         .status()
@@ -37,7 +36,7 @@ fn overlapping_paths_list_each_target_once() {
     let root = dir.path();
     node_project(&root.join("app"));
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .arg(root.join("app"))
         .args(["--mode", "auto", "--dry-run", "--no-size"])
@@ -57,7 +56,7 @@ fn paths_are_shown_relative_to_their_common_ancestor() {
     node_project(&work);
     node_project(&oss);
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .args([&work, &oss])
         .args(["--mode", "auto", "--dry-run", "--no-size"])
         .output()
