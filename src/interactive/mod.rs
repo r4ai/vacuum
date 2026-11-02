@@ -177,7 +177,11 @@ fn run_loop(
                                         errors: vec![],
                                     });
                                 }
-                                phase = Phase::Deleting(DeletingState::new(chosen, cli.dry_run));
+                                phase = Phase::Deleting(DeletingState::new(
+                                    chosen,
+                                    cli.dry_run,
+                                    cli.delete_method(),
+                                ));
                             }
                             ActionResult::Continue => {}
                         }

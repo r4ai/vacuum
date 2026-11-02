@@ -39,6 +39,9 @@ vacuum ~/projects --dry-run
 
 # サイズ計算をスキップして高速スキャン
 vacuum ~/projects --mode auto --no-size
+
+# 完全に削除せず、OS のゴミ箱に移動する（あとで復元できる）
+vacuum ~/projects --trash
 ```
 
 ### 終了コード

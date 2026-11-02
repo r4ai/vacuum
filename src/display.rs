@@ -3,6 +3,7 @@ use owo_colors::{OwoColorize, Stream};
 use std::path::Path;
 
 use crate::adapter::CleanTarget;
+use crate::cleaner::DeleteMethod;
 
 /// Print a summary table of all discovered targets.
 pub fn print_targets(targets: &[CleanTarget], root: &Path) {
@@ -50,7 +51,12 @@ pub fn print_cancelled() {
 }
 
 /// Print the final report after TUI-based deletion completes (safe mode).
-pub fn print_final_report(freed: u64, errors: &[(String, String)], dry_run: bool) {
+pub fn print_final_report(
+    freed: u64,
+    errors: &[(String, String)],
+    dry_run: bool,
+    method: DeleteMethod,
+) {
     if dry_run {
         println!(
             "{}",
@@ -61,8 +67,9 @@ pub fn print_final_report(freed: u64, errors: &[(String, String)], dry_run: bool
     }
 
     println!(
-        "\n{} Freed {}",
+        "\n{} {} {}",
         "✓".if_supports_color(Stream::Stdout, |t| t.green()),
+        method.done_label(),
         ByteSize(freed)
             .display()
             .si()
