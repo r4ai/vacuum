@@ -82,3 +82,19 @@ fn quiet_and_verbose_conflict() {
         .unwrap();
     assert!(!output.status.success());
 }
+
+#[test]
+fn verbose_explains_directly_excluded_targets() {
+    let dir = TempDir::new().unwrap();
+    node_project(dir.path());
+
+    let output = vacuum(
+        dir.path(),
+        &["--mode", "list", "--verbose", "--exclude", "node_modules"],
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("skip"), "{stderr}");
+    assert!(stderr.contains("node_modules"), "{stderr}");
+    assert!(stderr.contains("--exclude"), "{stderr}");
+}
