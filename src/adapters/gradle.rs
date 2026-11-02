@@ -1,66 +1,29 @@
 use std::path::Path;
-use walkdir::WalkDir;
 
-use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
+use crate::adapter::{Adapter, Context};
 
 pub struct GradleAdapter;
 
 const GRADLE_TARGETS: &[&str] = &[".gradle", "build"];
-
-fn has_gradle_context(dir: &Path) -> bool {
-    dir.join("build.gradle").exists() || dir.join("build.gradle.kts").exists()
-}
+const GRADLE_CONTEXT_FILES: &[&str] = &["build.gradle", "build.gradle.kts"];
 
 impl Adapter for GradleAdapter {
     fn name(&self) -> &'static str {
         "gradle"
     }
 
-    fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
-        let mut targets = Vec::new();
-        let mut iter = WalkDir::new(root).follow_links(false).into_iter();
-
-        while let Some(entry) = iter.next() {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
-            let path = entry.path();
-
-            if !entry.file_type().is_dir() {
-                continue;
-            }
-
-            let name = entry.file_name().to_string_lossy();
-            if !GRADLE_TARGETS.contains(&name.as_ref()) {
-                continue;
-            }
-
-            let parent = match path.parent() {
-                Some(p) => p,
-                None => continue,
-            };
-            if !has_gradle_context(parent) {
-                continue;
-            }
-
-            let size = compute_dir_size(path);
-            targets.push(CleanTarget {
-                path: path.to_path_buf(),
-                adapter: self.name(),
-                description: format!("Gradle build artifact ({name}/)"),
-                size,
-            });
-            iter.skip_current_dir();
-        }
-
-        Ok(targets)
+    fn match_dir(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String> {
+        // Check the name first so that unrelated directories cost no I/O.
+        (GRADLE_TARGETS.contains(&name)
+            && GRADLE_CONTEXT_FILES.iter().any(|f| ctx.has_file(parent, f)))
+        .then(|| format!("Gradle build artifact ({name}/)"))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scanner::scan_with;
     use std::fs;
     use tempfile::TempDir;
 
@@ -70,7 +33,7 @@ mod tests {
         fs::write(dir.path().join("build.gradle"), "plugins {}").unwrap();
         fs::create_dir(dir.path().join(".gradle")).unwrap();
 
-        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(GradleAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == dir.path().join(".gradle")));
         assert_eq!(targets[0].adapter, "gradle");
     }
@@ -81,7 +44,7 @@ mod tests {
         fs::write(dir.path().join("build.gradle"), "plugins {}").unwrap();
         fs::create_dir(dir.path().join("build")).unwrap();
 
-        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(GradleAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == dir.path().join("build")));
     }
 
@@ -91,7 +54,7 @@ mod tests {
         fs::write(dir.path().join("build.gradle.kts"), "plugins {}").unwrap();
         fs::create_dir(dir.path().join(".gradle")).unwrap();
 
-        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(GradleAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == dir.path().join(".gradle")));
     }
 
@@ -102,7 +65,7 @@ mod tests {
         fs::create_dir(dir.path().join(".gradle")).unwrap();
         fs::create_dir(dir.path().join("build")).unwrap();
 
-        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(GradleAdapter, dir.path());
         assert_eq!(targets.len(), 2);
     }
 
@@ -111,7 +74,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join(".gradle")).unwrap();
 
-        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(GradleAdapter, dir.path());
         assert!(targets.iter().all(|t| t.path != dir.path().join(".gradle")));
     }
 
@@ -120,7 +83,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join("build")).unwrap();
 
-        let targets = GradleAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(GradleAdapter, dir.path());
         assert!(targets.iter().all(|t| t.path != dir.path().join("build")));
     }
 }

@@ -1,7 +1,6 @@
 use std::path::Path;
-use walkdir::WalkDir;
 
-use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
+use crate::adapter::{Adapter, Context};
 
 pub struct PythonAdapter;
 
@@ -13,18 +12,15 @@ const PYTHON_CONTEXT_FILES: &[&str] = &[
     "requirements.txt",
 ];
 
-fn has_python_context(dir: &Path) -> bool {
-    PYTHON_CONTEXT_FILES.iter().any(|f| dir.join(f).exists())
+fn has_python_context(ctx: &mut Context, dir: &Path) -> bool {
+    PYTHON_CONTEXT_FILES.iter().any(|f| ctx.has_file(dir, f))
 }
 
 /// Whether Python bytecode (`__pycache__/`, `*.pyc`) in `dir` belongs to a
 /// Python project: `dir` or one of its 3 nearest ancestors has a context
 /// file, or `dir` holds a `.py` file.
-fn has_bytecode_context(dir: &Path) -> bool {
-    dir.ancestors().take(4).any(has_python_context)
-        || dir.read_dir().is_ok_and(|mut d| {
-            d.any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "py")))
-        })
+fn has_bytecode_context(ctx: &mut Context, dir: &Path) -> bool {
+    dir.ancestors().take(4).any(|p| has_python_context(ctx, p)) || ctx.has_extension(dir, "py")
 }
 
 impl Adapter for PythonAdapter {
@@ -32,75 +28,28 @@ impl Adapter for PythonAdapter {
         "python"
     }
 
-    fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
-        let mut targets = Vec::new();
-        let mut iter = WalkDir::new(root).follow_links(false).into_iter();
-
-        while let Some(entry) = iter.next() {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
-            let path = entry.path();
-
-            let file_name = entry.file_name().to_string_lossy();
-
-            if entry.file_type().is_dir() {
-                let name = file_name.as_ref();
-                if !PYTHON_DIR_TARGETS.contains(&name) {
-                    continue;
-                }
-
-                // For __pycache__, just check some parent up to 3 levels has python context
-                // For venv-like dirs, check the same directory has python context
-                let parent = match path.parent() {
-                    Some(p) => p,
-                    None => continue,
-                };
-
-                let has_context = if name == "__pycache__" {
-                    has_bytecode_context(parent)
-                } else {
-                    has_python_context(parent)
-                };
-
-                if !has_context {
-                    continue;
-                }
-
-                let size = compute_dir_size(path);
-                targets.push(CleanTarget {
-                    path: path.to_path_buf(),
-                    adapter: self.name(),
-                    description: format!("Python build artifact ({name}/)"),
-                    size,
-                });
-                iter.skip_current_dir();
-            } else if entry.file_type().is_file() {
-                // *.pyc files
-                if !file_name.ends_with(".pyc") {
-                    continue;
-                }
-                if !path.parent().is_some_and(has_bytecode_context) {
-                    continue;
-                }
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                targets.push(CleanTarget {
-                    path: path.to_path_buf(),
-                    adapter: self.name(),
-                    description: "Python bytecode (.pyc)".into(),
-                    size,
-                });
-            }
+    fn match_dir(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String> {
+        if !PYTHON_DIR_TARGETS.contains(&name) {
+            return None;
         }
+        let has_context = if name == "__pycache__" {
+            has_bytecode_context(ctx, parent)
+        } else {
+            has_python_context(ctx, parent)
+        };
+        has_context.then(|| format!("Python build artifact ({name}/)"))
+    }
 
-        Ok(targets)
+    fn match_file(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String> {
+        (name.ends_with(".pyc") && has_bytecode_context(ctx, parent))
+            .then(|| "Python bytecode (.pyc)".into())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scanner::scan_with;
     use std::fs;
     use tempfile::TempDir;
 
@@ -110,7 +59,7 @@ mod tests {
         fs::write(dir.path().join("main.py"), "print('hello')").unwrap();
         fs::create_dir(dir.path().join("__pycache__")).unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(
             targets
                 .iter()
@@ -126,7 +75,7 @@ mod tests {
         fs::create_dir_all(&subdir).unwrap();
         fs::create_dir(subdir.join("__pycache__")).unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == subdir.join("__pycache__")));
     }
 
@@ -135,7 +84,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join("__pycache__")).unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(
             targets.iter().all(|t| !t.path.ends_with("__pycache__")),
             "Should not detect __pycache__ without Python context"
@@ -149,7 +98,7 @@ mod tests {
         let pyc = dir.path().join("main.pyc");
         fs::write(&pyc, b"\x00\x00\x00\x00").unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == pyc));
     }
 
@@ -159,7 +108,7 @@ mod tests {
         let pyc = dir.path().join("foo.pyc");
         fs::write(&pyc, b"x").unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(targets.iter().all(|t| t.path != pyc));
     }
 
@@ -169,7 +118,7 @@ mod tests {
         fs::write(dir.path().join("requirements.txt"), "flask==2.0.0").unwrap();
         fs::create_dir(dir.path().join(".venv")).unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == dir.path().join(".venv")));
     }
 
@@ -179,7 +128,7 @@ mod tests {
         fs::write(dir.path().join("requirements.txt"), "django").unwrap();
         fs::create_dir(dir.path().join("venv")).unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == dir.path().join("venv")));
     }
 
@@ -188,7 +137,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join(".venv")).unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(targets.iter().all(|t| t.path != dir.path().join(".venv")));
     }
 
@@ -198,7 +147,7 @@ mod tests {
         fs::write(dir.path().join("setup.py"), "from setuptools import setup").unwrap();
         fs::create_dir(dir.path().join("dist")).unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == dir.path().join("dist")));
     }
 
@@ -208,7 +157,7 @@ mod tests {
         fs::write(dir.path().join("setup.cfg"), "[metadata]").unwrap();
         fs::create_dir(dir.path().join("build")).unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == dir.path().join("build")));
     }
 
@@ -218,7 +167,7 @@ mod tests {
         fs::write(dir.path().join("pyproject.toml"), "[project]").unwrap();
         fs::create_dir(dir.path().join(".eggs")).unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == dir.path().join(".eggs")));
     }
 
@@ -230,7 +179,7 @@ mod tests {
         fs::create_dir_all(venv.join("lib")).unwrap();
         fs::create_dir(venv.join("__pycache__")).unwrap();
 
-        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(PythonAdapter, dir.path());
         let venv_count = targets
             .iter()
             .filter(|t| t.path == dir.path().join(".venv"))

@@ -1,20 +1,15 @@
 use std::path::Path;
-use walkdir::WalkDir;
 
-use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
+use crate::adapter::{Adapter, Context};
 
 pub struct OcamlAdapter;
 
-fn has_ocaml_context(dir: &Path) -> bool {
-    if dir.join("dune-project").exists() || dir.join("dune-workspace").exists() {
-        return true;
-    }
+const OCAML_TARGETS: &[&str] = &["_build", "_opam"];
+const OCAML_CONTEXT_FILES: &[&str] = &["dune-project", "dune-workspace"];
 
-    dir.read_dir().is_ok_and(|entries| {
-        entries
-            .flatten()
-            .any(|entry| entry.path().extension().is_some_and(|ext| ext == "opam"))
-    })
+/// Whether `dir` is the root of a dune project or holds an `.opam` file.
+fn has_ocaml_context(ctx: &mut Context, dir: &Path) -> bool {
+    OCAML_CONTEXT_FILES.iter().any(|f| ctx.has_file(dir, f)) || ctx.has_extension(dir, "opam")
 }
 
 impl Adapter for OcamlAdapter {
@@ -22,51 +17,16 @@ impl Adapter for OcamlAdapter {
         "ocaml"
     }
 
-    fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
-        let mut targets = Vec::new();
-        let mut iter = WalkDir::new(root).follow_links(false).into_iter();
-
-        while let Some(entry) = iter.next() {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
-            let path = entry.path();
-
-            if !entry.file_type().is_dir() {
-                continue;
-            }
-
-            let name = entry.file_name().to_string_lossy();
-            if name != "_build" && name != "_opam" {
-                continue;
-            }
-
-            let parent = match path.parent() {
-                Some(p) => p,
-                None => continue,
-            };
-            if !has_ocaml_context(parent) {
-                continue;
-            }
-
-            let size = compute_dir_size(path);
-            targets.push(CleanTarget {
-                path: path.to_path_buf(),
-                adapter: self.name(),
-                description: format!("OCaml build artifact ({name}/)"),
-                size,
-            });
-            iter.skip_current_dir();
-        }
-
-        Ok(targets)
+    fn match_dir(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String> {
+        (OCAML_TARGETS.contains(&name) && has_ocaml_context(ctx, parent))
+            .then(|| format!("OCaml build artifact ({name}/)"))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scanner::scan_with;
     use std::fs;
     use tempfile::TempDir;
 
@@ -76,7 +36,7 @@ mod tests {
         fs::write(dir.path().join("dune-project"), "(lang dune 3.0)").unwrap();
         fs::create_dir(dir.path().join("_build")).unwrap();
 
-        let targets = OcamlAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(OcamlAdapter, dir.path());
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].path, dir.path().join("_build"));
         assert_eq!(targets[0].adapter, "ocaml");
@@ -87,7 +47,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join("_build")).unwrap();
 
-        let targets = OcamlAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(OcamlAdapter, dir.path());
         assert!(targets.is_empty());
     }
 
@@ -103,7 +63,7 @@ mod tests {
         fs::write(project_b.join("dune-project"), "(lang dune 3.0)").unwrap();
         fs::create_dir(project_b.join("_build")).unwrap();
 
-        let targets = OcamlAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(OcamlAdapter, dir.path());
         assert_eq!(targets.len(), 2);
     }
 
@@ -113,7 +73,7 @@ mod tests {
         fs::write(dir.path().join("dune-project"), "(lang dune 3.0)").unwrap();
         fs::create_dir_all(dir.path().join("_build").join("_build")).unwrap();
 
-        let targets = OcamlAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(OcamlAdapter, dir.path());
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].path, dir.path().join("_build"));
     }
@@ -124,7 +84,7 @@ mod tests {
         fs::write(dir.path().join("dune-workspace"), "(lang dune 3.0)").unwrap();
         fs::create_dir(dir.path().join("_opam")).unwrap();
 
-        let targets = OcamlAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(OcamlAdapter, dir.path());
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].path, dir.path().join("_opam"));
     }
@@ -135,7 +95,7 @@ mod tests {
         fs::write(dir.path().join("sample.opam"), "opam-version: \"2.0\"").unwrap();
         fs::create_dir(dir.path().join("_opam")).unwrap();
 
-        let targets = OcamlAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(OcamlAdapter, dir.path());
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].path, dir.path().join("_opam"));
     }
@@ -145,7 +105,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join("_opam")).unwrap();
 
-        let targets = OcamlAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(OcamlAdapter, dir.path());
         assert!(targets.is_empty());
     }
 }

@@ -2,7 +2,7 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::path::Path;
 use walkdir::WalkDir;
 
-use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
+use crate::adapter::{CleanTarget, compute_dir_size};
 
 pub struct GitignoreAdapter;
 
@@ -41,12 +41,14 @@ fn contains_whitelisted(gitignore: &Gitignore, root: &Path, dir: &Path) -> bool 
         })
 }
 
-impl Adapter for GitignoreAdapter {
-    fn name(&self) -> &'static str {
-        "gitignore"
-    }
+/// Unlike the other adapters, gitignore matching depends on the patterns
+/// of every ancestor and on nested repositories. It therefore runs its own
+/// walk instead of judging single entries.
+impl GitignoreAdapter {
+    pub const NAME: &'static str = "gitignore";
 
-    fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
+    /// Walk `root` recursively and return all paths its `.gitignore` matches.
+    pub fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
         let root_gitignore = root.join(".gitignore");
         if !root_gitignore.exists() {
             return Ok(vec![]);
@@ -116,7 +118,7 @@ impl Adapter for GitignoreAdapter {
                 };
                 targets.push(CleanTarget {
                     path: path.to_path_buf(),
-                    adapter: self.name(),
+                    adapter: Self::NAME,
                     description: format!("gitignore match: {}", relative.display()),
                     size,
                 });

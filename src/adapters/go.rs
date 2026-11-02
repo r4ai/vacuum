@@ -1,7 +1,6 @@
 use std::path::Path;
-use walkdir::WalkDir;
 
-use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
+use crate::adapter::{Adapter, Context};
 
 pub struct GoAdapter;
 
@@ -10,49 +9,16 @@ impl Adapter for GoAdapter {
         "go"
     }
 
-    fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
-        let mut targets = Vec::new();
-        let mut iter = WalkDir::new(root).follow_links(false).into_iter();
-
-        while let Some(entry) = iter.next() {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
-            let path = entry.path();
-
-            if !entry.file_type().is_dir() {
-                continue;
-            }
-            if entry.file_name() != "vendor" {
-                continue;
-            }
-
-            let parent = match path.parent() {
-                Some(p) => p,
-                None => continue,
-            };
-            if !parent.join("go.mod").exists() {
-                continue;
-            }
-
-            let size = compute_dir_size(path);
-            targets.push(CleanTarget {
-                path: path.to_path_buf(),
-                adapter: self.name(),
-                description: "Go vendor directory (vendor/)".into(),
-                size,
-            });
-            iter.skip_current_dir();
-        }
-
-        Ok(targets)
+    fn match_dir(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String> {
+        (name == "vendor" && ctx.has_file(parent, "go.mod"))
+            .then(|| "Go vendor directory (vendor/)".into())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scanner::scan_with;
     use std::fs;
     use tempfile::TempDir;
 
@@ -73,7 +39,7 @@ mod tests {
     fn no_vendor_returns_empty() {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("go.mod"), "module example.com/app").unwrap();
-        let targets = GoAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(GoAdapter, dir.path());
         assert!(targets.is_empty());
     }
 
@@ -81,7 +47,7 @@ mod tests {
     fn vendor_without_go_mod_not_detected() {
         let dir = TempDir::new().unwrap();
         fs::create_dir(dir.path().join("vendor")).unwrap();
-        let targets = GoAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(GoAdapter, dir.path());
         assert!(targets.is_empty());
     }
 
@@ -89,7 +55,7 @@ mod tests {
     fn vendor_with_go_mod_detected() {
         let dir = TempDir::new().unwrap();
         make_go_project(dir.path());
-        let targets = GoAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(GoAdapter, dir.path());
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].path, dir.path().join("vendor"));
         assert_eq!(targets[0].adapter, "go");
@@ -105,7 +71,7 @@ mod tests {
         make_go_project(&proj_a);
         make_go_project(&proj_b);
 
-        let targets = GoAdapter.scan(dir.path()).unwrap();
+        let targets = scan_with(GoAdapter, dir.path());
         assert_eq!(targets.len(), 2);
         let paths: Vec<_> = targets.iter().map(|t| &t.path).collect();
         assert!(paths.contains(&&proj_a.join("vendor")));

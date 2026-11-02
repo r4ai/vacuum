@@ -134,27 +134,36 @@ cargo fmt
 
 ### アダプターの追加
 
+アダプターは 1 つのエントリ（ディレクトリかファイル）を判定するだけでよい。
+ディレクトリの走査は `src/scanner.rs` が 1 回だけ行い、有効なアダプターに順に問い合わせる。
+
 1. `src/adapters/` に新しいファイルを作成する
 2. `Adapter` トレイトを実装する
 3. `src/adapters/mod.rs` に追加する
 4. `src/cli.rs` にフラグを追加する
-5. `src/scanner.rs` の `build_adapters` に組み込む
-6. `README.md` のアダプター一覧表を更新する
+5. `src/scanner.rs` の `ScanConfig` と `entry_adapters` に組み込む
+6. `src/interactive/adapter_select.rs` の `ALL_ADAPTERS` に追加する
+7. `README.md` のアダプター一覧表を更新する
 
 ```rust
 // src/adapters/my_adapter.rs
-use crate::adapter::{Adapter, CleanTarget, compute_dir_size};
+use std::path::Path;
+
+use crate::adapter::{Adapter, Context};
 
 pub struct MyAdapter;
 
 impl Adapter for MyAdapter {
-    fn name(&self) -> &'static str { "my-adapter" }
-    fn description(&self) -> &str { "..." }
-    fn is_safe(&self) -> bool { true }
+    fn name(&self) -> &'static str {
+        "my-adapter"
+    }
 
-    fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
-        // walkdir で対象ディレクトリを検索し、CleanTarget を返す
-        todo!()
+    // `parent` の中の `name` ディレクトリが削除対象なら、説明を返す。
+    fn match_dir(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String> {
+        (name == "out" && ctx.has_file(parent, "my.toml")).then(|| "My build output (out/)".into())
     }
 }
 ```
+
+ファイルを対象にする場合は `match_file` も実装する。
+単体テストでは `scanner::scan_with` を使う。本番と同じ走査経路で検証できる。
