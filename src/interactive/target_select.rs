@@ -467,8 +467,15 @@ pub fn render(frame: &mut ratatui::Frame, app: &mut App) {
     }
 }
 
+/// Rows the confirmation popup needs: 3 lines of text plus 2 borders.
+const CONFIRM_POPUP_HEIGHT: u16 = 5;
+
 fn render_confirm_popup(frame: &mut ratatui::Frame, app: &App, area: Rect) {
-    let popup = popup_area(area, 50, 20);
+    // Keep every line visible on short terminals, within the screen.
+    let base = popup_area(area, 50, 20);
+    let height = base.height.max(CONFIRM_POPUP_HEIGHT).min(area.height);
+    let y = area.y + (area.height - height) / 2;
+    let popup = Rect::new(base.x, y, base.width, height);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -1145,7 +1152,11 @@ mod tests {
     }
 
     fn screen(app: &mut App) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        screen_of_height(app, 30)
+    }
+
+    fn screen_of_height(app: &mut App, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(100, height)).unwrap();
         terminal.draw(|frame| render(frame, app)).unwrap();
         let buffer = terminal.backend().buffer();
         buffer.content().iter().map(|cell| cell.symbol()).collect()
@@ -1161,6 +1172,15 @@ mod tests {
         assert!(app.mode == Mode::ConfirmDelete);
         let screen = screen(&mut app);
         assert!(screen.contains("Delete 2 targets (3.0 kB)?"), "{screen}");
+    }
+
+    #[test]
+    fn confirmation_keys_are_visible_on_a_short_terminal() {
+        let mut app = app();
+        handle_normal_key(&mut app, press(KeyCode::Enter));
+        let screen = screen_of_height(&mut app, 20);
+        assert!(screen.contains("Delete 2 targets"), "{screen}");
+        assert!(screen.contains("[y] Delete"), "{screen}");
     }
 
     #[test]
