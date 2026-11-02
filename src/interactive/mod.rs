@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, IsTerminal as _};
 use std::path::Path;
 
 use anyhow::Context as _;
@@ -191,6 +191,14 @@ fn run_loop(
 /// Run the full safe-mode TUI workflow:
 /// adapter selection → scanning → target selection → deletion.
 pub fn run_tui_flow(root: &Path, cli: &Cli) -> anyhow::Result<TuiResult> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        anyhow::bail!(
+            "safe mode requires an interactive terminal.\n\
+             Use `--mode auto --dry-run` to list targets, \
+             or `--mode auto` to delete them without prompts."
+        );
+    }
+
     enable_raw_mode().context("Failed to enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
