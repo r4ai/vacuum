@@ -245,7 +245,6 @@ fn walk_parallel(
     sizes: &rayon::Scope<'_>,
     tx: mpsc::Sender<Found>,
 ) {
-    let excludes = &filters.excludes;
     let one_file_system = filters.limits.one_file_system;
     let root_device = if one_file_system {
         device_of(root)
@@ -266,7 +265,7 @@ fn walk_parallel(
                     return WalkState::Continue;
                 };
                 let (state, found) =
-                    judge(&entry, adapters, ignored, excludes, root_device, &mut ctx);
+                    judge(&entry, adapters, ignored, filters, root_device, &mut ctx);
                 let found = match found {
                     Some(Found::Unsized(mut target)) => {
                         // Directory walks run as rayon tasks, off the walk.
@@ -298,7 +297,7 @@ fn judge(
     entry: &DirEntry,
     adapters: &[&dyn Adapter],
     ignored: &HashSet<PathBuf>,
-    excludes: &Excludes,
+    filters: &Filters,
     root_device: Option<u64>,
     ctx: &mut Context,
 ) -> (WalkState, Option<Found>) {
@@ -311,7 +310,7 @@ fn judge(
     if root_device.is_some() && file_type.is_dir() && device_of(path) != root_device {
         return (WalkState::Skip, None);
     }
-    if excludes.is_excluded(path, file_type.is_dir()) {
+    if filters.prune(path, file_type.is_dir()) {
         // Neither a target nor walked into.
         return (WalkState::Skip, None);
     }
@@ -372,6 +371,21 @@ struct Filters {
     limits: WalkLimits,
     /// Whether to explain each dropped target on stderr.
     verbose: bool,
+}
+
+impl Filters {
+    /// Whether a walk must skip `path` because it is excluded. Explains
+    /// the skip with `--verbose`.
+    fn prune(&self, path: &Path, is_dir: bool) -> bool {
+        let excluded = self.excludes.is_excluded(path, is_dir);
+        if excluded && self.verbose {
+            eprintln!(
+                "skip {}: excluded by --exclude or .vacuumignore",
+                path.display()
+            );
+        }
+        excluded
+    }
 }
 
 struct Emitter<'a> {
@@ -454,7 +468,7 @@ impl Emitter<'_> {
 /// Run the gitignore adapter, reporting a failure as a warning.
 /// Excluded paths are not walked.
 fn scan_gitignore(root: &Path, filters: &Filters) -> Vec<CleanTarget> {
-    let excluded = |path: &Path, is_dir| filters.excludes.is_excluded(path, is_dir);
+    let excluded = |path: &Path, is_dir| filters.prune(path, is_dir);
     GitignoreAdapter
         .scan_except(root, &excluded, filters.limits)
         .unwrap_or_else(|e| {
