@@ -120,7 +120,42 @@ pub fn delete_targets(targets: &[CleanTarget], dry_run: bool) -> anyhow::Result<
         for (path, err) in &errors {
             eprintln!("  {path}: {err}");
         }
+        anyhow::bail!("failed to delete {} target(s)", errors.len());
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    #[test]
+    fn delete_targets_fails_when_a_target_cannot_be_deleted() {
+        let dir = TempDir::new().unwrap();
+        let missing = CleanTarget {
+            path: dir.path().join("missing"),
+            adapter: "test",
+            description: "test".into(),
+            size: 0,
+        };
+        assert!(delete_targets(&[missing], false).is_err());
+    }
+
+    #[test]
+    fn delete_targets_succeeds_when_all_targets_are_deleted() {
+        let dir = TempDir::new().unwrap();
+        let path: PathBuf = dir.path().join("file");
+        fs::write(&path, b"x").unwrap();
+        let target = CleanTarget {
+            path: path.clone(),
+            adapter: "test",
+            description: "test".into(),
+            size: 1,
+        };
+        assert!(delete_targets(&[target], false).is_ok());
+        assert!(!path.exists());
+    }
 }

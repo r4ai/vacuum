@@ -14,6 +14,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::cli::Cli;
+use crate::scanner::ScanConfig;
 
 mod adapter_select;
 mod delete_phase;
@@ -59,7 +60,7 @@ fn run_loop(
     root: &Path,
     cli: &Cli,
 ) -> anyhow::Result<TuiResult> {
-    let mut phase = Phase::AdapterSelection(AdapterSelectionState::new(cli.no_size));
+    let mut phase = Phase::AdapterSelection(AdapterSelectionState::new(ScanConfig::from(cli)));
 
     loop {
         // Render current phase

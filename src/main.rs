@@ -51,6 +51,9 @@ fn run() -> anyhow::Result<()> {
             TuiResult::Cancelled => display::print_cancelled(),
             TuiResult::Completed { freed, errors } => {
                 display::print_final_report(freed, &errors, cli.dry_run);
+                if !errors.is_empty() {
+                    anyhow::bail!("failed to delete {} target(s)", errors.len());
+                }
             }
         },
 
