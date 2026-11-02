@@ -80,7 +80,11 @@ fn run() -> anyhow::Result<()> {
         // ── List mode: print the targets, never delete ───────────────────────
         Mode::List => {
             let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
-            display::print_targets(&targets, &roots.base);
+            if cli.quiet {
+                display::print_summary(&targets, 0, 0, true, cli.delete_method());
+            } else {
+                display::print_targets(&targets, &roots.base);
+            }
         }
 
         // ── Auto mode: non-interactive scan + delete ─────────────────────────
@@ -90,18 +94,24 @@ fn run() -> anyhow::Result<()> {
                 return Ok(());
             }
 
-            let names: Vec<String> = roots.dirs.iter().map(|d| d.display().to_string()).collect();
-            eprintln!("Scanning {} ...", names.join(", "));
+            if !cli.quiet {
+                let names: Vec<String> =
+                    roots.dirs.iter().map(|d| d.display().to_string()).collect();
+                eprintln!("Scanning {} ...", names.join(", "));
+            }
             let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
 
-            display::print_targets(&targets, &roots.base);
-
-            if targets.is_empty() {
-                return Ok(());
+            if !cli.quiet {
+                display::print_targets(&targets, &roots.base);
             }
 
-            let dry_run = cli.dry_run;
-            cleaner::delete_targets(&targets, dry_run, cli.delete_method())?;
+            let method = cli.delete_method();
+            let report = cleaner::delete_targets(&targets, cli.dry_run, method, cli.quiet);
+            let removed = targets.len() - report.errors.len();
+            display::print_summary(&targets, report.freed, removed, cli.dry_run, method);
+            if !report.errors.is_empty() {
+                anyhow::bail!("failed to delete {} target(s)", report.errors.len());
+            }
         }
     }
 

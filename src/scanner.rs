@@ -22,6 +22,8 @@ pub struct ScanConfig {
     pub min_size: Option<u64>,
     /// How far the walks go.
     pub limits: WalkLimits,
+    /// Whether to explain each dropped target on stderr (`--verbose`).
+    pub verbose: bool,
     /// Extra gitignore-style patterns to exclude (`--exclude`).
     pub exclude: Vec<String>,
     /// Whether to keep targets that contain files tracked by git.
@@ -41,6 +43,7 @@ impl From<&Cli> for ScanConfig {
                 max_depth: cli.max_depth,
                 one_file_system: cli.one_file_system,
             },
+            verbose: cli.verbose,
             include_tracked: cli.include_tracked,
             enabled: cli.adapters.enabled.clone(),
         }
@@ -107,6 +110,7 @@ pub fn scan_with(adapter: impl Adapter, root: &Path) -> Vec<CleanTarget> {
         older_than: None,
         min_size: None,
         limits: WalkLimits::default(),
+        verbose: false,
     };
     walk(root, &[&adapter], false, false, &filters, &mut |t| {
         all.push(t)
@@ -129,6 +133,7 @@ pub fn scan_streaming(
         older_than: cfg.older_than,
         min_size: cfg.min_size,
         limits: cfg.limits,
+        verbose: cfg.verbose,
     };
     walk(
         root,
@@ -353,6 +358,8 @@ struct Filters {
     min_size: Option<u64>,
     /// How far the walks go.
     limits: WalkLimits,
+    /// Whether to explain each dropped target on stderr.
+    verbose: bool,
 }
 
 struct Emitter<'a> {
@@ -365,39 +372,14 @@ struct Emitter<'a> {
 }
 
 impl Emitter<'_> {
-    /// Report `target`, unless it was reported already, is excluded, or
-    /// contains tracked files that are not wanted. The checks here also
-    /// cover gitignore matches.
+    /// Report `target`, unless it was reported already or a filter drops
+    /// it. The filters here also cover gitignore matches.
     /// `stats` describe the target's tree, if already known.
     fn emit(&mut self, mut target: CleanTarget, stats: Option<DirStats>) {
-        // A directory is deleted as a whole, so it must not hold an
-        // excluded path either.
-        let is_dir = target.path.is_dir();
-        if self.filters.excludes.is_excluded(&target.path, is_dir)
-            || (is_dir && self.filters.excludes.contains_excluded(&target.path))
-        {
-            return;
-        }
-        if self.filters.min_size.is_some_and(|min| target.size < min) {
-            return;
-        }
-        if let Some(older_than) = self.filters.older_than
-            && !self.ages.is_older_than(&target.path, older_than)
-        {
-            return;
-        }
-        let one_file_system = self.filters.limits.one_file_system;
-        let stats = match stats {
-            Some(stats) => stats,
-            None if is_dir => dir_stats(&target.path, false, one_file_system),
-            None => DirStats::default(),
-        };
-        // Deleting the target would delete files on another file system.
-        if one_file_system && stats.crosses_mount {
-            return;
-        }
-        target.tracked = self.tracked.is_tracked(&target.path, Some(&stats.repos));
-        if target.tracked && !self.filters.include_tracked {
+        if let Some(reason) = self.skip_reason(&mut target, stats) {
+            if self.filters.verbose {
+                eprintln!("skip {}: {reason}", target.path.display());
+            }
             return;
         }
         if self.emitted.insert(target.path.clone()) {
@@ -406,6 +388,49 @@ impl Emitter<'_> {
             }
             (self.on_found)(target);
         }
+    }
+
+    /// Why a filter drops `target`, if one does. Also sets
+    /// `target.tracked`.
+    fn skip_reason(
+        &mut self,
+        target: &mut CleanTarget,
+        stats: Option<DirStats>,
+    ) -> Option<&'static str> {
+        let filters = self.filters;
+        let path = &target.path;
+        // A directory is deleted as a whole, so it must not hold an
+        // excluded path either.
+        let is_dir = path.is_dir();
+        if filters.excludes.is_excluded(path, is_dir) {
+            return Some("excluded by --exclude or .vacuumignore");
+        }
+        if is_dir && filters.excludes.contains_excluded(path) {
+            return Some("holds a path excluded by --exclude or .vacuumignore");
+        }
+        if filters.min_size.is_some_and(|min| target.size < min) {
+            return Some("smaller than --min-size");
+        }
+        if let Some(older_than) = filters.older_than
+            && !self.ages.is_older_than(path, older_than)
+        {
+            return Some("project changed within --older-than");
+        }
+        let one_file_system = filters.limits.one_file_system;
+        let stats = match stats {
+            Some(stats) => stats,
+            None if is_dir => dir_stats(path, false, one_file_system),
+            None => DirStats::default(),
+        };
+        // Deleting the target would delete files on another file system.
+        if one_file_system && stats.crosses_mount {
+            return Some("holds another file system (--one-file-system)");
+        }
+        target.tracked = self.tracked.is_tracked(path, Some(&stats.repos));
+        if target.tracked && !filters.include_tracked {
+            return Some("contains files tracked by git (see --include-tracked)");
+        }
+        None
     }
 
     /// Whether `path` or one of its ancestors was already reported.
