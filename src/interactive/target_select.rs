@@ -585,7 +585,8 @@ fn render_table(frame: &mut ratatui::Frame, app: &mut App, area: Rect) {
                 Cell::from(check).style(check_style),
                 Cell::from(highlight_matches(t.adapter, query)),
                 Cell::from(highlight_matches(&rel.display().to_string(), query)),
-                Cell::from(ByteSize(t.size).to_string()).style(Style::default().fg(Color::Cyan)),
+                Cell::from(ByteSize(t.size).display().si().to_string())
+                    .style(Style::default().fg(Color::Cyan)),
                 Cell::from(highlight_matches(&t.description, query)),
             ])
             .style(row_style)
@@ -631,8 +632,8 @@ fn render_stats(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     let sel_count = app.selected_count();
     let total_count = app.targets.len();
     let visible_count = app.order.len();
-    let sel_size = ByteSize(app.selected_size());
-    let total_size = ByteSize(app.total_size());
+    let sel_size = ByteSize(app.selected_size()).display().si();
+    let total_size = ByteSize(app.total_size()).display().si();
 
     let mut spans = vec![
         Span::raw(" Selected: "),
@@ -802,7 +803,7 @@ fn render_detail_popup(frame: &mut ratatui::Frame, app: &App, area: Rect) {
     let fields: &[(&str, String)] = &[
         ("Adapter", t.adapter.to_string()),
         ("Path", rel.display().to_string()),
-        ("Size", ByteSize(t.size).to_string()),
+        ("Size", ByteSize(t.size).display().si().to_string()),
         ("Description", t.description.clone()),
     ];
 

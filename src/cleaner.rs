@@ -75,9 +75,13 @@ pub fn delete_targets(targets: &[CleanTarget], dry_run: bool) -> anyhow::Result<
         println!("Dry run — the following would be deleted:");
         let total: u64 = targets.iter().map(|t| t.size).sum();
         for t in targets {
-            println!("  {}  ({})", t.path.display(), ByteSize(t.size));
+            println!(
+                "  {}  ({})",
+                t.path.display(),
+                ByteSize(t.size).display().si()
+            );
         }
-        println!("\nTotal: {}", ByteSize(total));
+        println!("\nTotal: {}", ByteSize(total).display().si());
         return Ok(());
     }
 
@@ -109,7 +113,7 @@ pub fn delete_targets(targets: &[CleanTarget], dry_run: bool) -> anyhow::Result<
         pb.inc(1);
     }
 
-    pb.finish_with_message(format!("Done. Freed {}", ByteSize(freed)));
+    pb.finish_with_message(format!("Done. Freed {}", ByteSize(freed).display().si()));
 
     if !errors.is_empty() {
         eprintln!("\nErrors during deletion:");
