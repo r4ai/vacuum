@@ -81,6 +81,25 @@ pub trait Adapter: Send + Sync {
     }
 }
 
+/// How far a scan walks (`--max-depth`, `--one-file-system`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WalkLimits {
+    /// Deepest level walked; the scan root's children are at depth 1.
+    pub max_depth: Option<usize>,
+    /// Whether to stay on the scan root's file system.
+    pub one_file_system: bool,
+}
+
+impl WalkLimits {
+    /// The limits for a walk that starts `depth` levels below the root.
+    pub fn below(self, depth: usize) -> Self {
+        Self {
+            max_depth: self.max_depth.map(|max| max.saturating_sub(depth)),
+            ..self
+        }
+    }
+}
+
 /// Compute the total byte count for a directory tree, best-effort.
 /// Symlinks are not followed; errors on individual entries are skipped.
 /// Sub-directories are measured in parallel on the rayon thread pool.
@@ -222,6 +241,18 @@ mod tests {
         let stats = dir_stats(dir.path(), false);
         assert_eq!(stats.repos, vec![lib]);
         assert_eq!(stats.size, 0, "size is not computed when not requested");
+    }
+
+    #[test]
+    fn walk_limits_below_reduces_max_depth() {
+        let limits = WalkLimits {
+            max_depth: Some(3),
+            one_file_system: true,
+        };
+        assert_eq!(limits.below(2).max_depth, Some(1));
+        assert_eq!(limits.below(5).max_depth, Some(0));
+        assert!(limits.below(2).one_file_system);
+        assert_eq!(WalkLimits::default().below(2).max_depth, None);
     }
 
     #[test]

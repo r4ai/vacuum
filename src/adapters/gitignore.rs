@@ -2,7 +2,7 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::path::Path;
 use walkdir::WalkDir;
 
-use crate::adapter::{CleanTarget, compute_dir_size};
+use crate::adapter::{CleanTarget, WalkLimits, compute_dir_size};
 
 pub struct GitignoreAdapter;
 
@@ -50,15 +50,16 @@ impl GitignoreAdapter {
     /// Walk `root` recursively and return all paths its `.gitignore` matches.
     #[cfg(test)]
     pub fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
-        self.scan_except(root, &|_, _| false)
+        self.scan_except(root, &|_, _| false, WalkLimits::default())
     }
 
     /// Like `scan`, but neither walks nor returns paths for which
-    /// `excluded(path, is_dir)` holds.
+    /// `excluded(path, is_dir)` holds, nor paths beyond `limits`.
     pub fn scan_except(
         &self,
         root: &Path,
         excluded: &dyn Fn(&Path, bool) -> bool,
+        limits: WalkLimits,
     ) -> anyhow::Result<Vec<CleanTarget>> {
         let root_gitignore = root.join(".gitignore");
         if !root_gitignore.exists() {
@@ -70,7 +71,13 @@ impl GitignoreAdapter {
         let gitignore = builder.build()?;
 
         let mut targets = Vec::new();
-        let mut iter = WalkDir::new(root).follow_links(false).into_iter();
+        let mut walk = WalkDir::new(root)
+            .follow_links(false)
+            .same_file_system(limits.one_file_system);
+        if let Some(max_depth) = limits.max_depth {
+            walk = walk.max_depth(max_depth);
+        }
+        let mut iter = walk.into_iter();
 
         while let Some(entry) = iter.next() {
             let entry = match entry {
@@ -102,7 +109,8 @@ impl GitignoreAdapter {
             // (a file for worktrees and submodules, a directory otherwise).
             // Never delete it as a whole; apply its own `.gitignore` instead.
             if is_dir && is_git_root(path) {
-                targets.extend(self.scan_except(path, excluded)?);
+                let depth = entry.depth();
+                targets.extend(self.scan_except(path, excluded, limits.below(depth))?);
                 iter.skip_current_dir();
                 continue;
             }

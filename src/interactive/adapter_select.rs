@@ -231,6 +231,7 @@ mod tests {
             exclude: Vec::new(),
             older_than: None,
             min_size: None,
+            limits: Default::default(),
             include_tracked: false,
             enabled: ["cargo", "python", "go", "gradle", "maven", "ocaml"]
                 .into_iter()

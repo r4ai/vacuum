@@ -54,6 +54,14 @@ pub struct Cli {
     #[arg(long, value_name = "SIZE", conflicts_with = "no_size")]
     pub min_size: Option<bytesize::ByteSize>,
 
+    /// Walk at most N levels below PATH (its children are level 1)
+    #[arg(long, value_name = "N")]
+    pub max_depth: Option<usize>,
+
+    /// Do not cross into other file systems (mount points)
+    #[arg(long)]
+    pub one_file_system: bool,
+
     /// Skip size calculation to speed up scanning [default: off]
     #[arg(long, default_value_t = false, help_heading = "Performance")]
     pub no_size: bool,
