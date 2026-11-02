@@ -38,7 +38,12 @@ fn json_lists_targets_without_deleting_on_dry_run() {
     assert_eq!(targets[0]["size"], 5);
     assert_eq!(
         targets[0]["path"],
-        root.join("node_modules").display().to_string()
+        // vacuum prints canonical paths (e.g. /private/var on macOS).
+        root.canonicalize()
+            .unwrap()
+            .join("node_modules")
+            .display()
+            .to_string()
     );
     assert_eq!(value["total_size"], 5);
     assert_eq!(value["result"]["dry_run"], true);
