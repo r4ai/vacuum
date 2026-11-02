@@ -18,6 +18,7 @@ indicatif     = "0.18"
 owo-colors    = { version = "4", features = ["supports-colors"] }
 rayon         = "1"
 ratatui       = "0.30"
+trash         = "5"
 walkdir       = "2"
 
 [dev-dependencies]
