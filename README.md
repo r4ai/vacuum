@@ -103,6 +103,7 @@ vacuum ~/projects --min-size 100MB
 | `--js-cache`  | `.next/`, `.nuxt/`, `.svelte-kit/`, `.turbo/`, `.parcel-cache/`, `.angular/` | on |
 | `--cargo`     | `target/`                                      | on              |
 | `--python`    | `__pycache__/`, `.venv/`, `dist/`, `build/` 等 | on              |
+| `--python-cache` | `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.tox/`, `.nox/`, `*.egg-info/` | on |
 | `--go`        | `vendor/`                                      | on              |
 | `--gradle`    | `.gradle/`, `build/`                           | on              |
 | `--maven`     | `target/`                                      | on              |
