@@ -56,6 +56,13 @@ vacuum ~/projects --mode auto --no-size
 
 コンテキストファイル（`package.json`, `Cargo.toml` 等）が存在するディレクトリのみを対象とする。誤検知を防ぐためのガードとして機能する。
 
+### Git worktree
+
+`gitignore` アダプターは Git worktree やサブモジュール（`.git` を持つディレクトリ）を丸ごと削除しない。
+worktree の中では、その worktree 自身の `.gitignore` を適用する。
+例えば `.claude/worktrees/` が無視されていても、Claude Code の worktree は残る。
+worktree 内のビルド成果物だけが削除される。
+
 ### アダプターの有効・無効化
 
 フラグにはオプショナルなブール値を渡せる。
