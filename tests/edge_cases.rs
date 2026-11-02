@@ -77,3 +77,37 @@ fn file_path_instead_of_dir_exits_with_error() {
         "Should fail when path is a file, not a directory"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn deletion_failure_exits_with_non_zero_code() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let project = dir.path().join("project");
+    common::make_file(&project.join("package.json"), b"{}");
+    common::make_file(&project.join("node_modules").join("a.js"), b"");
+
+    // Removing node_modules needs write permission on its parent.
+    std::fs::set_permissions(&project, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let writable = std::fs::write(project.join("probe"), b"").is_ok();
+
+    let output = Command::new(common::vacuum_bin())
+        .arg(&project)
+        .args(["--mode", "auto"])
+        .output()
+        .unwrap();
+
+    std::fs::set_permissions(&project, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    if writable {
+        eprintln!("skipped: permissions are not enforced (running as root?)");
+        return;
+    }
+    assert!(
+        !output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(project.join("node_modules").exists());
+}
