@@ -183,3 +183,29 @@ fn config_with_both_no_size_and_min_size_is_an_error() {
     );
     assert!(!output.status.success());
 }
+
+#[cfg(unix)]
+#[test]
+fn home_relative_exclude_follows_a_symlinked_directory() {
+    let dir = TempDir::new().unwrap();
+    let real = dir.path().join("mnt").join("work");
+    let project = real.join("important").join("app");
+    node_project(&project);
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    std::os::unix::fs::symlink(&real, home.join("work")).unwrap();
+
+    let output = vacuum(
+        &home,
+        "exclude = [\"~/work/important/**\"]\n",
+        &home.join("work").join("important").join("app"),
+        &["--mode", "auto"],
+    );
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(project.join("node_modules").exists());
+}
