@@ -1,7 +1,6 @@
 mod common;
 
 use std::path::Path;
-use std::process::Command;
 use tempfile::TempDir;
 
 /// Two Node projects, `keep` and `drop`, each with `node_modules/`.
@@ -13,7 +12,7 @@ fn setup(root: &Path) {
 }
 
 fn vacuum(root: &Path, args: &[&str]) {
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .args(args)
@@ -83,7 +82,7 @@ fn exclude_applies_to_gitignore_matches() {
 #[test]
 fn invalid_exclude_pattern_is_an_error() {
     let dir = TempDir::new().unwrap();
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(dir.path())
         .args(["--mode", "auto", "--exclude", "a/**b/[z-a]"])
         .output()
