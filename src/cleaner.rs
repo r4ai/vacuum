@@ -92,69 +92,82 @@ pub fn delete_with_progress(
 
 // ─── Classic indicatif-based deletion (used for auto mode) ───────────────────
 
+/// The outcome of removing targets.
+#[derive(Debug, Default)]
+pub struct DeleteReport {
+    /// Bytes of the targets removed.
+    pub freed: u64,
+    /// `(path, error)` for each target that could not be removed.
+    pub errors: Vec<(String, String)>,
+}
+
+/// Remove `targets` without printing anything. `after_each` runs after
+/// each target, removed or not.
+pub fn remove_all(
+    targets: &[CleanTarget],
+    method: DeleteMethod,
+    mut after_each: impl FnMut(&CleanTarget),
+) -> DeleteReport {
+    let mut report = DeleteReport::default();
+    for target in targets {
+        match remove(target, method) {
+            Ok(()) => report.freed += target.size,
+            Err(e) => report
+                .errors
+                .push((target.path.display().to_string(), format!("{e:#}"))),
+        }
+        after_each(target);
+    }
+    report
+}
+
 /// Delete the given targets, showing a progress bar.
 /// In dry-run mode, only prints what would be deleted.
 pub fn delete_targets(
     targets: &[CleanTarget],
     dry_run: bool,
     method: DeleteMethod,
-) -> anyhow::Result<()> {
-    if targets.is_empty() {
-        println!("Nothing to delete.");
-        return Ok(());
-    }
-
+    quiet: bool,
+) -> DeleteReport {
     if dry_run {
-        println!("Dry run — the following would be deleted:");
-        let total: u64 = targets.iter().map(|t| t.size).sum();
-        for t in targets {
-            println!(
-                "  {}  ({})",
-                t.path.display(),
-                ByteSize(t.size).display().si()
-            );
+        if !quiet && !targets.is_empty() {
+            println!("Dry run — the following would be deleted:");
+            for t in targets {
+                println!(
+                    "  {}  ({})",
+                    t.path.display(),
+                    ByteSize(t.size).display().si()
+                );
+            }
+            println!();
         }
-        println!("\nTotal: {}", ByteSize(total).display().si());
-        return Ok(());
+        return DeleteReport::default();
     }
 
-    let pb = ProgressBar::new(targets.len() as u64);
+    let pb = if quiet {
+        ProgressBar::hidden()
+    } else {
+        ProgressBar::new(targets.len() as u64)
+    };
     pb.set_style(
         ProgressStyle::with_template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len}  {msg}")
             .unwrap()
             .progress_chars("=>-"),
     );
 
-    let mut errors: Vec<(String, anyhow::Error)> = Vec::new();
-    let mut freed: u64 = 0;
-
-    for target in targets {
+    let report = remove_all(targets, method, |target| {
         pb.set_message(format!("{}", target.path.display()));
-
-        let result = remove(target, method);
-
-        match result {
-            Ok(()) => freed += target.size,
-            Err(e) => errors.push((target.path.display().to_string(), e)),
-        }
         pb.inc(1);
-    }
+    });
+    pb.finish_and_clear();
 
-    pb.finish_with_message(format!(
-        "Done. {} {}",
-        method.done_label(),
-        ByteSize(freed).display().si()
-    ));
-
-    if !errors.is_empty() {
-        eprintln!("\nErrors during deletion:");
-        for (path, err) in &errors {
+    if !report.errors.is_empty() {
+        eprintln!("Errors during deletion:");
+        for (path, err) in &report.errors {
             eprintln!("  {path}: {err}");
         }
-        anyhow::bail!("failed to delete {} target(s)", errors.len());
     }
-
-    Ok(())
+    report
 }
 
 #[cfg(test)]
@@ -173,7 +186,8 @@ mod tests {
             description: "test".into(),
             size: 0,
         };
-        assert!(delete_targets(&[missing], false, DeleteMethod::Remove).is_err());
+        let report = delete_targets(&[missing], false, DeleteMethod::Remove, true);
+        assert_eq!(report.errors.len(), 1);
     }
 
     #[test]
@@ -188,7 +202,9 @@ mod tests {
             description: "test".into(),
             size: 1,
         };
-        assert!(delete_targets(&[target], false, DeleteMethod::Remove).is_ok());
+        let report = delete_targets(&[target], false, DeleteMethod::Remove, true);
+        assert!(report.errors.is_empty());
+        assert_eq!(report.freed, 1);
         assert!(!path.exists());
     }
 }

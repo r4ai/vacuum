@@ -1,7 +1,6 @@
 mod common;
 
 use std::path::Path;
-use std::process::Command;
 use tempfile::TempDir;
 
 /// `big` has a 2 MB `node_modules/`, `small` a tiny one.
@@ -16,7 +15,7 @@ fn setup(root: &Path) {
 }
 
 fn vacuum(root: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(common::vacuum_bin())
+    common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .args(args)
