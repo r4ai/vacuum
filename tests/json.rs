@@ -79,3 +79,26 @@ fn json_requires_auto_mode() {
     assert!(!output.status.success());
     assert!(stderr.contains("--json"), "{stderr}");
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn json_reports_trashed_bytes_apart_from_freed_bytes() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("project");
+    node_project(&root);
+    let data_home = dir.path().join("data");
+    std::fs::create_dir_all(&data_home).unwrap();
+
+    let output = Command::new(common::vacuum_bin())
+        .arg(&root)
+        .args(["--mode", "auto", "--json", "--trash"])
+        .env("XDG_DATA_HOME", &data_home)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["result"]["method"], "trash");
+    assert_eq!(value["result"]["freed"], 0);
+    assert_eq!(value["result"]["trashed"], 5);
+}
