@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -14,7 +13,7 @@ fn auto_mode_deletes_python_pycache() {
         b"\x00\x00\x00\x00",
     );
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
@@ -35,7 +34,7 @@ fn auto_mode_deletes_pyc_files() {
     common::make_file(&root.join("main.py"), b"print('hello')");
     common::make_file(&root.join("main.pyc"), b"\x00\x00\x00\x00");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
@@ -57,7 +56,7 @@ fn auto_mode_deletes_python_venv() {
     common::make_dir(&root.join(".venv").join("lib"));
     common::make_file(&root.join(".venv").join("lib").join("python.so"), b"so");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
@@ -77,7 +76,7 @@ fn auto_mode_keeps_pyc_without_python_context() {
     let root = dir.path();
     common::make_file(&root.join("other").join("foo.pyc"), b"x");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
@@ -98,7 +97,7 @@ fn auto_mode_deletes_pyc_with_context_in_ancestor() {
     let pyc = root.join("src").join("pkg").join("mod.pyc");
     common::make_file(&pyc, b"x");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
