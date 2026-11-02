@@ -2,7 +2,7 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::path::Path;
 use walkdir::WalkDir;
 
-use crate::adapter::{CleanTarget, WalkLimits, compute_dir_size};
+use crate::adapter::{CleanTarget, WalkLimits, compute_dir_size, device_of};
 
 pub struct GitignoreAdapter;
 
@@ -78,6 +78,13 @@ impl GitignoreAdapter {
             walk = walk.max_depth(max_depth);
         }
         let mut iter = walk.into_iter();
+        // The walk does not enter another file system, but still yields
+        // the mount point itself; it must not become a target either.
+        let root_device = if limits.one_file_system {
+            device_of(root)
+        } else {
+            None
+        };
 
         while let Some(entry) = iter.next() {
             let entry = match entry {
@@ -88,6 +95,12 @@ impl GitignoreAdapter {
 
             // Skip the root itself
             if path == root {
+                continue;
+            }
+
+            if root_device.is_some() && entry.file_type().is_dir() && device_of(path) != root_device
+            {
+                iter.skip_current_dir();
                 continue;
             }
 
