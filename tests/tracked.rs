@@ -1,7 +1,6 @@
 mod common;
 
 use std::path::Path;
-use std::process::Command;
 use tempfile::TempDir;
 
 /// A Go project whose `vendor/` is committed, and a Node project whose
@@ -21,7 +20,7 @@ fn setup(root: &Path) {
 }
 
 fn vacuum(root: &Path, args: &[&str]) -> std::process::Output {
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .args(args)

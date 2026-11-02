@@ -62,6 +62,18 @@ pub struct Cli {
     #[arg(long)]
     pub one_file_system: bool,
 
+    /// Print the targets and the deletion result as JSON (auto mode only)
+    #[arg(long)]
+    pub json: bool,
+
+    /// Print only errors and the final result (list and auto modes)
+    #[arg(short, long, conflicts_with = "verbose")]
+    pub quiet: bool,
+
+    /// Explain why each dropped target was skipped (list and auto modes)
+    #[arg(short, long)]
+    pub verbose: bool,
+
     /// Skip size calculation to speed up scanning [default: off]
     #[arg(long, default_value_t = false, help_heading = "Performance")]
     pub no_size: bool,
@@ -150,6 +162,8 @@ pub enum Mode {
     Safe,
     /// Delete all found targets automatically without prompting
     Auto,
+    /// Only list the targets; never delete. Needs no terminal
+    List,
 }
 
 #[cfg(test)]

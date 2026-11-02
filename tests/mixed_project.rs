@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -35,7 +34,7 @@ fn auto_mode_handles_mixed_project() {
         b"binary",
     );
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(root)
         .args(["--mode", "auto"])
         .status()
@@ -62,7 +61,7 @@ fn auto_mode_handles_mixed_project() {
 
 /// Run vacuum in auto + dry-run mode with gitignore enabled; return stdout.
 fn dry_run_with_gitignore(root: &std::path::Path) -> String {
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--gitignore", "--dry-run", "--no-size"])
         .output()
@@ -119,7 +118,7 @@ fn nested_targets_are_deleted_without_errors() {
         b"",
     );
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(root)
         .args(["--mode", "auto", "--gitignore"])
         .output()
@@ -129,4 +128,25 @@ fn nested_targets_are_deleted_without_errors() {
     assert!(output.status.success(), "stderr: {stderr}");
     assert!(!stderr.contains("Failed"), "stderr: {stderr}");
     assert!(!root.join("pkgs").exists());
+}
+
+#[test]
+fn auto_mode_reports_a_breakdown_by_adapter() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::make_file(&root.join("web").join("package.json"), b"{}");
+    common::make_file(&root.join("web").join("node_modules").join("a.js"), b"123");
+    common::make_file(&root.join("api").join("Cargo.toml"), b"[package]");
+    common::make_file(&root.join("api").join("target").join("app"), b"1234567");
+
+    let output = common::vacuum()
+        .arg(root)
+        .args(["--mode", "auto"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success());
+    assert!(stdout.contains("cargo  1 item   7 B"), "{stdout}");
+    assert!(stdout.contains("node   1 item   3 B"), "{stdout}");
 }
