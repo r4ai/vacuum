@@ -119,6 +119,15 @@ impl Config {
             cli.older_than =
                 Some(crate::age::parse_duration(&duration).map_err(|e| anyhow::anyhow!(e))?);
         }
+        // `--min-size` needs sizes, so it cannot go with `--no-size`. clap
+        // checked the command line alone; resolve what the config added.
+        if cli.no_size && cli.min_size.is_some() {
+            match (unset("no_size"), unset("min_size")) {
+                (true, true) => anyhow::bail!("no_size and min_size cannot be set together"),
+                (true, false) => cli.no_size = false,
+                (false, _) => cli.min_size = None,
+            }
+        }
         for (name, enabled) in self.adapters {
             let spec = REGISTRY
                 .iter()
@@ -155,10 +164,10 @@ mod tests {
 
     #[test]
     fn config_fills_unset_options() {
-        let cli = cli_with("no_size = true\nmax_depth = 3\nmin_size = \"1MB\"\n", &[]);
-        assert!(cli.no_size);
+        let cli = cli_with("max_depth = 3\nmin_size = \"1MB\"\n", &[]);
         assert_eq!(cli.max_depth, Some(3));
         assert_eq!(cli.min_size.map(|s| s.as_u64()), Some(1_000_000));
+        assert!(cli_with("no_size = true\n", &[]).no_size);
     }
 
     #[test]

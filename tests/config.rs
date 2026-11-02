@@ -125,3 +125,61 @@ fn unknown_adapter_in_config_is_an_error() {
     );
     assert!(!output.status.success());
 }
+
+#[test]
+fn home_relative_exclude_covers_a_root_inside_it() {
+    let dir = TempDir::new().unwrap();
+    let project = dir.path().join("work").join("important").join("app");
+    node_project(&project);
+
+    let output = vacuum(
+        dir.path(),
+        "exclude = [\"~/work/important/**\"]\n",
+        &project,
+        &["--mode", "auto"],
+    );
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(project.join("node_modules").exists());
+}
+
+#[test]
+fn cli_min_size_wins_over_config_no_size() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("project");
+    common::make_file(&root.join("package.json"), b"{}");
+    common::make_file(
+        &root.join("node_modules").join("a.bin"),
+        &vec![0u8; 2_000_000],
+    );
+
+    let output = vacuum(
+        dir.path(),
+        "no_size = true\n",
+        &root,
+        &["--mode", "auto", "--min-size", "1MB"],
+    );
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!root.join("node_modules").exists());
+}
+
+#[test]
+fn config_with_both_no_size_and_min_size_is_an_error() {
+    let dir = TempDir::new().unwrap();
+    let output = vacuum(
+        dir.path(),
+        "no_size = true\nmin_size = \"1MB\"\n",
+        dir.path(),
+        &["--mode", "list"],
+    );
+    assert!(!output.status.success());
+}

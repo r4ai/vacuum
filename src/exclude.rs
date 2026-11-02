@@ -11,11 +11,16 @@ pub const IGNORE_FILE: &str = ".vacuumignore";
 /// relative to the scan root.
 pub struct Excludes {
     root: PathBuf,
+    /// Patterns relative to the scan root.
     matcher: Gitignore,
+    /// `~/...` patterns, matched against paths relative to the home
+    /// directory. They also cover a scan root inside an excluded path.
+    home: Option<(PathBuf, Gitignore)>,
 }
 
 impl Excludes {
     /// Exclude `patterns` and the patterns in `<root>/.vacuumignore`.
+    /// A pattern starting with `~/` is a path from the home directory.
     pub fn new(root: &Path, patterns: &[String]) -> anyhow::Result<Self> {
         let mut builder = GitignoreBuilder::new(root);
         let file = root.join(IGNORE_FILE);
@@ -24,17 +29,28 @@ impl Excludes {
         {
             return Err(e).with_context(|| format!("Invalid {}", file.display()));
         }
+        let home_dir = home_dir();
+        let mut home_builder = home_dir.as_deref().map(GitignoreBuilder::new);
         for pattern in patterns {
-            let Some(pattern) = anchor_home(pattern, root) else {
-                continue;
+            let (target, line) = match (pattern.strip_prefix("~/"), home_builder.as_mut()) {
+                // Anchor it at the home directory.
+                (Some(rest), Some(home)) => (home, format!("/{rest}")),
+                // Without a home directory, it cannot match anything.
+                (Some(_), None) => continue,
+                (None, _) => (&mut builder, pattern.clone()),
             };
-            builder
-                .add_line(None, &pattern)
+            target
+                .add_line(None, &line)
                 .with_context(|| format!("Invalid --exclude pattern: {pattern}"))?;
         }
+        let home = match (home_dir, home_builder) {
+            (Some(dir), Some(builder)) => Some((dir, builder.build()?)),
+            _ => None,
+        };
         Ok(Self {
             root: root.to_path_buf(),
             matcher: builder.build()?,
+            home,
         })
     }
 
@@ -44,27 +60,44 @@ impl Excludes {
         Self {
             root: PathBuf::new(),
             matcher: Gitignore::empty(),
+            home: None,
         }
     }
 
-    /// Whether `path`, or one of its ancestors below the root, is excluded.
+    /// Whether `path`, or one of its ancestors, is excluded. The scan root
+    /// is excluded only by a `~/` pattern that covers it.
     pub fn is_excluded(&self, path: &Path, is_dir: bool) -> bool {
-        match path.strip_prefix(&self.root) {
+        let by_root = match path.strip_prefix(&self.root) {
             Ok(relative) if !relative.as_os_str().is_empty() => self
                 .matcher
                 .matched_path_or_any_parents(relative, is_dir)
                 .is_ignore(),
             _ => false,
-        }
+        };
+        by_root
+            || self.home.as_ref().is_some_and(|(home, matcher)| {
+                path.strip_prefix(home).is_ok_and(|relative| {
+                    !relative.as_os_str().is_empty()
+                        && matcher
+                            .matched_path_or_any_parents(relative, is_dir)
+                            .is_ignore()
+                })
+            })
     }
-}
 
-impl Excludes {
+    fn has_patterns(&self) -> bool {
+        self.matcher.num_ignores() > 0
+            || self
+                .home
+                .as_ref()
+                .is_some_and(|(_, matcher)| matcher.num_ignores() > 0)
+    }
+
     /// Whether any path strictly inside `dir` is excluded. Deleting `dir`
     /// as a whole would delete it too. Walks `dir` only when there are
     /// exclude patterns.
     pub fn contains_excluded(&self, dir: &Path) -> bool {
-        if self.matcher.num_ignores() == 0 {
+        if !self.has_patterns() {
             return false;
         }
         walkdir::WalkDir::new(dir)
@@ -76,18 +109,11 @@ impl Excludes {
     }
 }
 
-/// Turn a `~/...` pattern into one anchored at `root`: `~/p/keep` with
-/// root `~/p` becomes `/keep`. `None` when the path is not under `root`,
-/// so the pattern cannot match there. Other patterns are kept as they are.
-fn anchor_home(pattern: &str, root: &Path) -> Option<String> {
-    let Some(rest) = pattern.strip_prefix("~/") else {
-        return Some(pattern.to_string());
-    };
+/// The canonical home directory, if known.
+fn home_dir() -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
-    let home = dunce::canonicalize(&home).unwrap_or(home);
-    let relative = home.join(rest);
-    let relative = relative.strip_prefix(root).ok()?;
-    Some(format!("/{}", relative.display()))
+    // `dunce` avoids Windows' `\\?\C:\...` form, like the scan roots.
+    Some(dunce::canonicalize(&home).unwrap_or(home))
 }
 
 #[cfg(test)]
