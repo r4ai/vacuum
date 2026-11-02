@@ -33,28 +33,28 @@ static ALL_ADAPTERS: &[AdapterEntry] = &[
     },
     AdapterEntry {
         name: "python",
-        description: "__pycache__/, .venv/",
+        description: "__pycache__/, .venv/, venv/, dist/, build/, .eggs/, *.pyc",
         is_safe: true,
         get: |c| c.python,
         set: |c, v| c.python = v,
     },
     AdapterEntry {
         name: "go",
-        description: "pkg/mod/ cache",
+        description: "vendor/",
         is_safe: true,
         get: |c| c.go,
         set: |c, v| c.go = v,
     },
     AdapterEntry {
         name: "gradle",
-        description: ".gradle/",
+        description: ".gradle/, build/",
         is_safe: true,
         get: |c| c.gradle,
         set: |c, v| c.gradle = v,
     },
     AdapterEntry {
         name: "maven",
-        description: ".m2/",
+        description: "target/",
         is_safe: true,
         get: |c| c.maven,
         set: |c, v| c.maven = v,
@@ -276,5 +276,61 @@ pub fn handle_adapter_selection_key(
             AdapterSelectionResult::Continue
         }
         _ => AdapterSelectionResult::Continue,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    /// Render the adapter selection screen and return its rows as text.
+    fn rendered_rows() -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(120, 20)).unwrap();
+        let mut state = AdapterSelectionState::new(false);
+        terminal
+            .draw(|frame| render_adapter_selection(frame, &mut state))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    fn row_of<'a>(rows: &'a [String], adapter: &str) -> &'a str {
+        let label = format!(" {adapter:<10}");
+        rows.iter()
+            .find(|row| row.contains(&label))
+            .unwrap_or_else(|| panic!("no row for {adapter}: {rows:#?}"))
+    }
+
+    #[test]
+    fn descriptions_match_actual_targets() {
+        let rows = rendered_rows();
+        let expected = [
+            ("node", "node_modules/"),
+            ("cargo", "target/"),
+            (
+                "python",
+                "__pycache__/, .venv/, venv/, dist/, build/, .eggs/, *.pyc",
+            ),
+            ("go", "vendor/"),
+            ("gradle", ".gradle/, build/"),
+            ("maven", "target/"),
+            ("ocaml", "_build/, _opam/"),
+            ("gitignore", ".gitignore-matched paths"),
+        ];
+        for (adapter, description) in expected {
+            let row = row_of(&rows, adapter);
+            assert!(
+                row.contains(description),
+                "{adapter}: expected {description:?} in {row:?}"
+            );
+        }
     }
 }
