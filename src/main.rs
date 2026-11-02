@@ -1,5 +1,6 @@
 use anyhow::Context as _;
 use clap::{CommandFactory as _, Parser as _};
+use std::process::ExitCode;
 
 mod adapter;
 mod adapters;
@@ -12,7 +13,19 @@ mod scanner;
 use cli::{Cli, Mode};
 use interactive::TuiResult;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            // Print the error chain without a backtrace, even when
+            // `RUST_BACKTRACE` is set: these are user-facing errors.
+            eprintln!("Error: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Shell completion generation — exits immediately

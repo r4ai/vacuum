@@ -78,6 +78,25 @@ fn file_path_instead_of_dir_exits_with_error() {
     );
 }
 
+#[test]
+fn safe_mode_without_terminal_explains_how_to_proceed() {
+    let dir = TempDir::new().unwrap();
+
+    // `output()` runs vacuum without a terminal on stdin and stdout.
+    let output = Command::new(common::vacuum_bin())
+        .arg(dir.path())
+        .env("RUST_BACKTRACE", "1")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains("interactive terminal"), "stderr: {stderr}");
+    assert!(!stderr.contains("backtrace"), "stderr: {stderr}");
+    assert!(stderr.contains("--mode auto"), "stderr: {stderr}");
+    assert!(!stderr.contains("raw mode"), "stderr: {stderr}");
+}
+
 #[cfg(unix)]
 #[test]
 fn deletion_failure_exits_with_non_zero_code() {
