@@ -48,7 +48,18 @@ impl GitignoreAdapter {
     pub const NAME: &'static str = "gitignore";
 
     /// Walk `root` recursively and return all paths its `.gitignore` matches.
+    #[cfg(test)]
     pub fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
+        self.scan_except(root, &|_, _| false)
+    }
+
+    /// Like `scan`, but neither walks nor returns paths for which
+    /// `excluded(path, is_dir)` holds.
+    pub fn scan_except(
+        &self,
+        root: &Path,
+        excluded: &dyn Fn(&Path, bool) -> bool,
+    ) -> anyhow::Result<Vec<CleanTarget>> {
         let root_gitignore = root.join(".gitignore");
         if !root_gitignore.exists() {
             return Ok(vec![]);
@@ -73,6 +84,13 @@ impl GitignoreAdapter {
                 continue;
             }
 
+            if excluded(path, entry.file_type().is_dir()) {
+                if entry.file_type().is_dir() {
+                    iter.skip_current_dir();
+                }
+                continue;
+            }
+
             // Skip .git directory
             if path.components().any(|c| c.as_os_str() == ".git") {
                 continue;
@@ -84,7 +102,7 @@ impl GitignoreAdapter {
             // (a file for worktrees and submodules, a directory otherwise).
             // Never delete it as a whole; apply its own `.gitignore` instead.
             if is_dir && is_git_root(path) {
-                targets.extend(self.scan(path)?);
+                targets.extend(self.scan_except(path, excluded)?);
                 iter.skip_current_dir();
                 continue;
             }

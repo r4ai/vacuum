@@ -135,7 +135,7 @@ fn walk(
     if adapters.is_empty() {
         // Only gitignore can be enabled — no need for a second walk.
         if gitignore {
-            for target in scan_gitignore(root) {
+            for target in scan_gitignore(root, excludes) {
                 out.emit(target, None);
             }
         }
@@ -148,7 +148,7 @@ fn walk(
     let mut ignored: HashMap<PathBuf, CleanTarget> = HashMap::new();
     if gitignore {
         ignored.extend(
-            scan_gitignore(root)
+            scan_gitignore(root, excludes)
                 .into_iter()
                 .map(|t| (t.path.clone(), t)),
         );
@@ -353,11 +353,15 @@ impl Emitter<'_> {
 }
 
 /// Run the gitignore adapter, reporting a failure as a warning.
-fn scan_gitignore(root: &Path) -> Vec<CleanTarget> {
-    GitignoreAdapter.scan(root).unwrap_or_else(|e| {
-        eprintln!("Warning: adapter '{}' failed: {e}", GitignoreAdapter::NAME);
-        Vec::new()
-    })
+/// Excluded paths are not walked.
+fn scan_gitignore(root: &Path, excludes: &Excludes) -> Vec<CleanTarget> {
+    let excluded = |path: &Path, is_dir| excludes.is_excluded(path, is_dir);
+    GitignoreAdapter
+        .scan_except(root, &excluded)
+        .unwrap_or_else(|e| {
+            eprintln!("Warning: adapter '{}' failed: {e}", GitignoreAdapter::NAME);
+            Vec::new()
+        })
 }
 
 #[cfg(test)]
