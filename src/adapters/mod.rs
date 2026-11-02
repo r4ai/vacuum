@@ -121,6 +121,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         kind: Kind::Entry(&OcamlAdapter),
     },
     AdapterSpec {
+        name: "dotnet",
+        label: ".NET",
+        targets: "bin/, obj/ next to a *.csproj, *.fsproj or *.vbproj",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::DOTNET),
+    },
+    AdapterSpec {
         name: GitignoreAdapter::NAME,
         label: "Gitignore",
         targets: ".gitignore-matched paths",
