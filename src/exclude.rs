@@ -56,6 +56,23 @@ impl Excludes {
     }
 }
 
+impl Excludes {
+    /// Whether any path strictly inside `dir` is excluded. Deleting `dir`
+    /// as a whole would delete it too. Walks `dir` only when there are
+    /// exclude patterns.
+    pub fn contains_excluded(&self, dir: &Path) -> bool {
+        if self.matcher.num_ignores() == 0 {
+            return false;
+        }
+        walkdir::WalkDir::new(dir)
+            .min_depth(1)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .any(|e| self.is_excluded(e.path(), e.file_type().is_dir()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,6 +96,17 @@ mod tests {
         fs::write(root.join(IGNORE_FILE), "*.venv\n").unwrap();
         let excludes = Excludes::new(root, &[]).unwrap();
         assert!(excludes.is_excluded(&root.join("a").join("big.venv"), true));
+    }
+
+    #[test]
+    fn directory_holding_an_excluded_path_is_detected() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("node_modules").join("keep")).unwrap();
+        fs::create_dir_all(root.join("other")).unwrap();
+        let excludes = Excludes::new(root, &["node_modules/keep".into()]).unwrap();
+        assert!(excludes.contains_excluded(&root.join("node_modules")));
+        assert!(!excludes.contains_excluded(&root.join("other")));
     }
 
     #[test]

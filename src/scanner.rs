@@ -308,9 +308,11 @@ impl Emitter<'_> {
     /// Report `target`, unless it was reported already or is excluded.
     /// The exclusion check here also covers gitignore matches.
     fn emit(&mut self, mut target: CleanTarget) {
-        if self
-            .excludes
-            .is_excluded(&target.path, target.path.is_dir())
+        // A directory is deleted as a whole, so it must not hold an
+        // excluded path either.
+        let is_dir = target.path.is_dir();
+        if self.excludes.is_excluded(&target.path, is_dir)
+            || (is_dir && self.excludes.contains_excluded(&target.path))
         {
             return;
         }

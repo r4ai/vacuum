@@ -92,3 +92,23 @@ fn invalid_exclude_pattern_is_an_error() {
     assert!(!output.status.success());
     assert!(stderr.contains("--exclude"), "stderr: {stderr}");
 }
+
+#[test]
+fn target_holding_an_excluded_path_is_kept() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    setup(root);
+    common::make_file(
+        &root
+            .join("drop")
+            .join("node_modules")
+            .join("keep")
+            .join("x.js"),
+        b"",
+    );
+
+    vacuum(root, &["--exclude", "drop/node_modules/keep"]);
+
+    assert!(root.join("drop").join("node_modules").join("keep").exists());
+    assert!(!root.join("keep").join("node_modules").exists());
+}
