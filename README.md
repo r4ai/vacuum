@@ -13,10 +13,12 @@ cargo install --path .
 ## 使い方
 
 ```
-vacuum [OPTIONS] [PATH]
+vacuum [OPTIONS] [PATH]...
 ```
 
 `PATH` を省略すると、カレントディレクトリをスキャンする。
+`PATH` は複数指定できる（例: `vacuum ~/work ~/oss`）。一方がもう一方の中にある場合は、外側だけをスキャンする。
+一覧に表示するパスは、指定したすべての `PATH` に共通する祖先からの相対パスになる。
 
 safe モードでは、Enter を押すと確認ダイアログが出る。`y` で削除し、`n` か `Esc` で選択画面に戻る。
 

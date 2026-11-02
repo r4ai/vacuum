@@ -20,9 +20,9 @@ use crate::cleaner::DeleteMethod;
                   --node=false  disable"
 )]
 pub struct Cli {
-    /// Directory to scan
+    /// Directories to scan
     #[arg(default_value = ".")]
-    pub path: PathBuf,
+    pub paths: Vec<PathBuf>,
 
     /// Cleanup mode
     #[arg(short = 'm', long, value_enum, default_value_t = Mode::Safe)]

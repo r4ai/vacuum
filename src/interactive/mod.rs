@@ -1,5 +1,4 @@
 use std::io::{self, IsTerminal as _};
-use std::path::Path;
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -16,6 +15,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::cli::Cli;
+use crate::roots::Roots;
 use crate::scanner::ScanConfig;
 
 mod adapter_select;
@@ -59,7 +59,7 @@ enum Phase {
 
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    root: &Path,
+    roots: &Roots,
     cli: &Cli,
 ) -> anyhow::Result<TuiResult> {
     let mut phase = Phase::AdapterSelection(AdapterSelectionState::new(ScanConfig::from(cli)));
@@ -86,7 +86,7 @@ fn run_loop(
                             errors: vec![],
                         });
                     }
-                    phase = Phase::TargetSelection(App::new(targets, root.to_path_buf()));
+                    phase = Phase::TargetSelection(App::new(targets, roots.base.clone()));
                     continue;
                 }
             }
@@ -141,7 +141,7 @@ fn run_loop(
                             AdapterSelectionResult::Confirm => {
                                 let cfg = state.cfg.clone();
                                 phase =
-                                    Phase::Scanning(ScanningState::new(root.to_path_buf(), cfg));
+                                    Phase::Scanning(ScanningState::new(roots.dirs.clone(), cfg));
                             }
                             AdapterSelectionResult::Continue => {}
                         }
@@ -253,7 +253,7 @@ fn install_panic_hook() {
 
 /// Run the full safe-mode TUI workflow:
 /// adapter selection → scanning → target selection → deletion.
-pub fn run_tui_flow(root: &Path, cli: &Cli) -> anyhow::Result<TuiResult> {
+pub fn run_tui_flow(roots: &Roots, cli: &Cli) -> anyhow::Result<TuiResult> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         anyhow::bail!(
             "safe mode requires an interactive terminal.\n\
@@ -272,7 +272,7 @@ pub fn run_tui_flow(root: &Path, cli: &Cli) -> anyhow::Result<TuiResult> {
     let result = entered.and_then(|()| {
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend).context("Failed to create terminal")?;
-        run_loop(&mut terminal, root, cli)
+        run_loop(&mut terminal, roots, cli)
     });
 
     // Always restore terminal, even on error

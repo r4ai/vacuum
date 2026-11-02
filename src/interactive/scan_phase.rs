@@ -27,13 +27,15 @@ pub struct ScanningState {
 }
 
 impl ScanningState {
-    /// Spawn background scan thread and return the state.
-    pub fn new(root: PathBuf, cfg: ScanConfig) -> Self {
+    /// Spawn a background thread that scans `roots` one after another.
+    pub fn new(roots: Vec<PathBuf>, cfg: ScanConfig) -> Self {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = scan_streaming(&root, &cfg, &mut |target| {
-                let _ = tx.send(ScanMsg::Found(target));
-            });
+            for root in &roots {
+                let _ = scan_streaming(root, &cfg, &mut |target| {
+                    let _ = tx.send(ScanMsg::Found(target));
+                });
+            }
             let _ = tx.send(ScanMsg::Done);
         });
         Self {

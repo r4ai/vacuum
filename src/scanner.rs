@@ -84,11 +84,14 @@ impl ScanConfig {
     }
 }
 
-/// Scan with the adapters enabled by `cli` and return the sorted targets.
-pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> {
+/// Scan `roots` with the adapters enabled by `cli` and return the sorted
+/// targets.
+pub fn scan_enabled(roots: &[PathBuf], cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> {
     let cfg = ScanConfig::from(cli);
     let mut all: Vec<CleanTarget> = Vec::new();
-    scan_streaming(root, &cfg, &mut |t| all.push(t))?;
+    for root in roots {
+        scan_streaming(root, &cfg, &mut |t| all.push(t))?;
+    }
     all.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(all)
 }
@@ -432,7 +435,7 @@ mod tests {
         fs::create_dir(dir.path().join(".venv")).unwrap();
         fs::write(dir.path().join("module.pyc"), b"\x00").unwrap();
 
-        let results = scan_enabled(dir.path(), &enabled_cli()).unwrap();
+        let results = scan_enabled(&[dir.path().to_path_buf()], &enabled_cli()).unwrap();
         let adapters: Vec<_> = results.iter().map(|t| t.adapter).collect();
 
         assert!(adapters.contains(&"node"));
@@ -462,7 +465,7 @@ mod tests {
         fs::write(dir.path().join("build.gradle"), "plugins {}").unwrap();
         fs::create_dir(dir.path().join("build")).unwrap();
 
-        let results = scan_enabled(dir.path(), &enabled_cli()).unwrap();
+        let results = scan_enabled(&[dir.path().to_path_buf()], &enabled_cli()).unwrap();
         let target = results
             .iter()
             .find(|t| t.path == dir.path().join("target"))
@@ -484,7 +487,7 @@ mod tests {
 
         let mut cli = enabled_cli();
         cli.adapters.enabled.remove("node");
-        let results = scan_enabled(dir.path(), &cli).unwrap();
+        let results = scan_enabled(&[dir.path().to_path_buf()], &cli).unwrap();
         assert!(results.is_empty());
     }
 
@@ -501,7 +504,7 @@ mod tests {
 
         let mut cli = enabled_cli();
         cli.no_size = true;
-        let results = scan_enabled(dir.path(), &cli).unwrap();
+        let results = scan_enabled(&[dir.path().to_path_buf()], &cli).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].path, dir.path().join("node_modules"));
         assert_eq!(results[0].size, 0);
