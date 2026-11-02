@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::adapter::{Adapter, CleanTarget, Context, WalkLimits, dir_stats};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
-use crate::age;
+use crate::age::AgeIndex;
 use crate::cli::Cli;
 use crate::exclude::Excludes;
 use crate::tracked::TrackedIndex;
@@ -152,6 +152,7 @@ fn walk(
         no_size,
         filters,
         tracked: TrackedIndex::default(),
+        ages: AgeIndex::default(),
         on_found,
     };
 
@@ -355,6 +356,7 @@ struct Emitter<'a> {
     no_size: bool,
     filters: &'a Filters,
     tracked: TrackedIndex,
+    ages: AgeIndex,
     on_found: &'a mut dyn FnMut(CleanTarget),
 }
 
@@ -376,7 +378,7 @@ impl Emitter<'_> {
             return;
         }
         if let Some(older_than) = self.filters.older_than
-            && !age::is_older_than(&target.path, older_than)
+            && !self.ages.is_older_than(&target.path, older_than)
         {
             return;
         }
