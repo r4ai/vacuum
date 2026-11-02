@@ -70,3 +70,40 @@ fn auto_mode_deletes_python_venv() {
         "requirements.txt should be preserved"
     );
 }
+
+#[test]
+fn auto_mode_keeps_pyc_without_python_context() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::make_file(&root.join("other").join("foo.pyc"), b"x");
+
+    let status = Command::new(common::vacuum_bin())
+        .arg(root)
+        .args(["--mode", "auto"])
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert!(
+        root.join("other").join("foo.pyc").exists(),
+        "foo.pyc without Python context must be preserved"
+    );
+}
+
+#[test]
+fn auto_mode_deletes_pyc_with_context_in_ancestor() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::make_file(&root.join("pyproject.toml"), b"[project]");
+    let pyc = root.join("src").join("pkg").join("mod.pyc");
+    common::make_file(&pyc, b"x");
+
+    let status = Command::new(common::vacuum_bin())
+        .arg(root)
+        .args(["--mode", "auto"])
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert!(!pyc.exists(), "mod.pyc should be deleted");
+}

@@ -17,6 +17,16 @@ fn has_python_context(dir: &Path) -> bool {
     PYTHON_CONTEXT_FILES.iter().any(|f| dir.join(f).exists())
 }
 
+/// Whether Python bytecode (`__pycache__/`, `*.pyc`) in `dir` belongs to a
+/// Python project: `dir` or one of its 3 nearest ancestors has a context
+/// file, or `dir` holds a `.py` file.
+fn has_bytecode_context(dir: &Path) -> bool {
+    dir.ancestors().take(4).any(has_python_context)
+        || dir.read_dir().is_ok_and(|mut d| {
+            d.any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "py")))
+        })
+}
+
 impl Adapter for PythonAdapter {
     fn name(&self) -> &'static str {
         "python"
@@ -49,26 +59,7 @@ impl Adapter for PythonAdapter {
                 };
 
                 let has_context = if name == "__pycache__" {
-                    // __pycache__ appears next to .py files; check up the tree
-                    let mut p = parent;
-                    let mut found = false;
-                    for _ in 0..4 {
-                        if has_python_context(p) {
-                            found = true;
-                            break;
-                        }
-                        match p.parent() {
-                            Some(pp) => p = pp,
-                            None => break,
-                        }
-                    }
-                    // Also accept if there are .py files in same directory
-                    found
-                        || parent.read_dir().is_ok_and(|mut d| {
-                            d.any(|e| {
-                                e.is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "py"))
-                            })
-                        })
+                    has_bytecode_context(parent)
                 } else {
                     has_python_context(parent)
                 };
@@ -88,6 +79,9 @@ impl Adapter for PythonAdapter {
             } else if entry.file_type().is_file() {
                 // *.pyc files
                 if !file_name.ends_with(".pyc") {
+                    continue;
+                }
+                if !path.parent().is_some_and(has_bytecode_context) {
                     continue;
                 }
                 let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
@@ -151,11 +145,22 @@ mod tests {
     #[test]
     fn pyc_file_detected() {
         let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("main.py"), "").unwrap();
         let pyc = dir.path().join("main.pyc");
         fs::write(&pyc, b"\x00\x00\x00\x00").unwrap();
 
         let targets = PythonAdapter.scan(dir.path()).unwrap();
         assert!(targets.iter().any(|t| t.path == pyc));
+    }
+
+    #[test]
+    fn pyc_file_without_context_not_detected() {
+        let dir = TempDir::new().unwrap();
+        let pyc = dir.path().join("foo.pyc");
+        fs::write(&pyc, b"x").unwrap();
+
+        let targets = PythonAdapter.scan(dir.path()).unwrap();
+        assert!(targets.iter().all(|t| t.path != pyc));
     }
 
     #[test]

@@ -174,6 +174,20 @@ fn has_python_source_file_cached(cache: &mut HashMap<PathBuf, bool>, dir: &Path)
     has_source
 }
 
+/// Whether Python bytecode (`__pycache__/`, `*.pyc`) in `dir` belongs to a
+/// Python project: `dir` or one of its 3 nearest ancestors has a context
+/// file, or `dir` holds a `.py` file.
+fn has_python_bytecode_context_cached(
+    context_cache: &mut HashMap<PathBuf, bool>,
+    source_cache: &mut HashMap<PathBuf, bool>,
+    dir: &Path,
+) -> bool {
+    dir.ancestors()
+        .take(4)
+        .any(|p| has_python_context_cached(context_cache, p))
+        || has_python_source_file_cached(source_cache, dir)
+}
+
 /// Scan enabled adapters with a single directory walk for core adapters.
 /// Gitignore adapter is still executed separately due to matcher semantics.
 pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> {
@@ -279,19 +293,11 @@ pub fn scan_streaming(
             }
             if matched.is_none() && cfg.python && PYTHON_DIR_TARGETS.contains(&name.as_ref()) {
                 let has_context = if name == "__pycache__" {
-                    let mut p = parent;
-                    let mut found = false;
-                    for _ in 0..4 {
-                        if has_python_context_cached(&mut python_context_cache, p) {
-                            found = true;
-                            break;
-                        }
-                        match p.parent() {
-                            Some(pp) => p = pp,
-                            None => break,
-                        }
-                    }
-                    found || has_python_source_file_cached(&mut python_source_cache, parent)
+                    has_python_bytecode_context_cached(
+                        &mut python_context_cache,
+                        &mut python_source_cache,
+                        parent,
+                    )
                 } else {
                     has_python_context_cached(&mut python_context_cache, parent)
                 };
@@ -352,7 +358,16 @@ pub fn scan_streaming(
             }
         } else if entry.file_type().is_file() {
             let name = entry.file_name().to_string_lossy();
-            if cfg.python && name.ends_with(".pyc") {
+            let is_project_bytecode = cfg.python
+                && name.ends_with(".pyc")
+                && path.parent().is_some_and(|parent| {
+                    has_python_bytecode_context_cached(
+                        &mut python_context_cache,
+                        &mut python_source_cache,
+                        parent,
+                    )
+                });
+            if is_project_bytecode {
                 let size = if cfg.no_size {
                     0
                 } else {
