@@ -1,6 +1,5 @@
 mod common;
 
-use std::process::Command;
 use tempfile::TempDir;
 
 #[test]
@@ -8,7 +7,7 @@ fn no_targets_exits_cleanly() {
     let dir = TempDir::new().unwrap();
     common::make_file(&dir.path().join("hello.txt"), b"hello");
 
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg(dir.path())
         .args(["--mode", "auto"])
         .status()
@@ -23,7 +22,7 @@ fn all_adapters_disabled_exits_cleanly() {
     common::make_file(&dir.path().join("package.json"), b"{}");
     common::make_dir(&dir.path().join("node_modules"));
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(dir.path())
         .args([
             "--mode",
@@ -55,7 +54,7 @@ fn all_adapters_disabled_exits_cleanly() {
 
 #[test]
 fn invalid_path_exits_with_error() {
-    let status = Command::new(common::vacuum_bin())
+    let status = common::vacuum()
         .arg("/nonexistent/path/that/does/not/exist/vacuum_test")
         .status()
         .unwrap();
@@ -69,10 +68,7 @@ fn file_path_instead_of_dir_exits_with_error() {
     let file = dir.path().join("file.txt");
     common::make_file(&file, b"content");
 
-    let status = Command::new(common::vacuum_bin())
-        .arg(&file)
-        .status()
-        .unwrap();
+    let status = common::vacuum().arg(&file).status().unwrap();
 
     assert!(
         !status.success(),
@@ -85,7 +81,7 @@ fn safe_mode_without_terminal_explains_how_to_proceed() {
     let dir = TempDir::new().unwrap();
 
     // `output()` runs vacuum without a terminal on stdin and stdout.
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(dir.path())
         .env("RUST_BACKTRACE", "1")
         .output()
@@ -113,7 +109,7 @@ fn deletion_failure_exits_with_non_zero_code() {
     std::fs::set_permissions(&project, std::fs::Permissions::from_mode(0o555)).unwrap();
     let writable = std::fs::write(project.join("probe"), b"").is_ok();
 
-    let output = Command::new(common::vacuum_bin())
+    let output = common::vacuum()
         .arg(&project)
         .args(["--mode", "auto"])
         .output()
