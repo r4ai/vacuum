@@ -95,6 +95,7 @@ fn safe_mode_without_terminal_explains_how_to_proceed() {
     assert!(!stderr.contains("backtrace"), "stderr: {stderr}");
     assert!(stderr.contains("--mode auto"), "stderr: {stderr}");
     assert!(!stderr.contains("raw mode"), "stderr: {stderr}");
+}
 
 #[cfg(unix)]
 #[test]
