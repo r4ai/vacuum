@@ -84,24 +84,8 @@ pub struct AdapterSelectionState {
 }
 
 impl AdapterSelectionState {
-    /// Build state with safe adapters pre-selected.
-    pub fn new(no_size: bool) -> Self {
-        let mut cfg = ScanConfig {
-            no_size,
-            node: false,
-            cargo: false,
-            python: false,
-            go: false,
-            gradle: false,
-            maven: false,
-            ocaml: false,
-            gitignore: false,
-        };
-        for entry in ALL_ADAPTERS {
-            if entry.is_safe {
-                (entry.set)(&mut cfg, true);
-            }
-        }
+    /// Build state whose selection starts from `cfg` (the CLI flags).
+    pub fn new(cfg: ScanConfig) -> Self {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
         Self {
@@ -286,9 +270,9 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     /// Render the adapter selection screen and return its rows as text.
-    fn rendered_rows() -> Vec<String> {
+    fn rendered_rows(cfg: ScanConfig) -> Vec<String> {
         let mut terminal = Terminal::new(TestBackend::new(120, 20)).unwrap();
-        let mut state = AdapterSelectionState::new(false);
+        let mut state = AdapterSelectionState::new(cfg);
         terminal
             .draw(|frame| render_adapter_selection(frame, &mut state))
             .unwrap();
@@ -309,9 +293,38 @@ mod tests {
             .unwrap_or_else(|| panic!("no row for {adapter}: {rows:#?}"))
     }
 
+    fn scan_config(node: bool, gitignore: bool) -> ScanConfig {
+        ScanConfig {
+            no_size: false,
+            node,
+            cargo: true,
+            python: true,
+            go: true,
+            gradle: true,
+            maven: true,
+            ocaml: true,
+            gitignore,
+        }
+    }
+
+    fn is_checked(row: &str) -> bool {
+        row.contains('✓')
+    }
+
+    #[test]
+    fn initial_state_reflects_cli_flags() {
+        let rows = rendered_rows(scan_config(false, true));
+        assert!(!is_checked(row_of(&rows, "node")), "node should be off");
+        assert!(
+            is_checked(row_of(&rows, "gitignore")),
+            "gitignore should be on"
+        );
+        assert!(is_checked(row_of(&rows, "cargo")), "cargo should be on");
+    }
+
     #[test]
     fn descriptions_match_actual_targets() {
-        let rows = rendered_rows();
+        let rows = rendered_rows(scan_config(true, false));
         let expected = [
             ("node", "node_modules/"),
             ("cargo", "target/"),
