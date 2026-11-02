@@ -28,12 +28,14 @@ pub fn print_targets(targets: &[CleanTarget], root: &Path) {
 
     for t in targets {
         let rel = t.path.strip_prefix(root).unwrap_or(&t.path);
+        let tracked = if t.tracked { "  [tracked]" } else { "" };
         println!(
-            "  {}  {}  {}",
+            "  {}  {}  {}{}",
             format!("[{}]", t.adapter).if_supports_color(Stream::Stdout, |s| s.cyan()),
             rel.display(),
             format!("({})", ByteSize(t.size).display().si())
                 .if_supports_color(Stream::Stdout, |s| s.bright_black()),
+            tracked.if_supports_color(Stream::Stdout, |s| s.yellow()),
         );
     }
 

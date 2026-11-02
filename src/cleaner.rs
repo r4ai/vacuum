@@ -136,6 +136,7 @@ mod tests {
     fn delete_targets_fails_when_a_target_cannot_be_deleted() {
         let dir = TempDir::new().unwrap();
         let missing = CleanTarget {
+            tracked: false,
             path: dir.path().join("missing"),
             adapter: "test",
             description: "test".into(),
@@ -150,6 +151,7 @@ mod tests {
         let path: PathBuf = dir.path().join("file");
         fs::write(&path, b"x").unwrap();
         let target = CleanTarget {
+            tracked: false,
             path: path.clone(),
             adapter: "test",
             description: "test".into(),

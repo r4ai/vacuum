@@ -12,6 +12,8 @@ pub struct CleanTarget {
     pub description: String,
     /// Size in bytes (computed by the adapter during scan).
     pub size: u64,
+    /// Whether the target is, or contains, a file tracked by git.
+    pub tracked: bool,
 }
 
 /// Cached filesystem lookups shared by all adapters during one scan.

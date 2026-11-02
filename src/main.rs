@@ -9,6 +9,7 @@ mod cli;
 mod display;
 mod interactive;
 mod scanner;
+mod tracked;
 
 use cli::{Cli, Mode};
 use interactive::TuiResult;

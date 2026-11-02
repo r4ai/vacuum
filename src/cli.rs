@@ -31,6 +31,10 @@ pub struct Cli {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Also list targets that contain files tracked by git [default: off]
+    #[arg(long)]
+    pub include_tracked: bool,
+
     /// Skip size calculation to speed up scanning [default: off]
     #[arg(long, default_value_t = false, help_heading = "Performance")]
     pub no_size: bool,

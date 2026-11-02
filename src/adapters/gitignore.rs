@@ -117,6 +117,7 @@ impl GitignoreAdapter {
                     entry.metadata().map(|m| m.len()).unwrap_or(0)
                 };
                 targets.push(CleanTarget {
+                    tracked: false,
                     path: path.to_path_buf(),
                     adapter: Self::NAME,
                     description: format!("gitignore match: {}", relative.display()),

@@ -6,12 +6,15 @@ use std::sync::mpsc;
 use crate::adapter::{Adapter, CleanTarget, Context, compute_dir_size};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::cli::Cli;
+use crate::tracked::TrackedIndex;
 
 /// Scanner settings extracted from CLI flags.
 /// This is `Clone + Send + 'static`, enabling use across thread boundaries.
 #[derive(Clone, Debug)]
 pub struct ScanConfig {
     pub no_size: bool,
+    /// Whether to keep targets that contain files tracked by git.
+    pub include_tracked: bool,
     /// Names of the enabled adapters (see [`REGISTRY`]).
     pub enabled: HashSet<&'static str>,
 }
@@ -20,6 +23,7 @@ impl From<&Cli> for ScanConfig {
     fn from(cli: &Cli) -> Self {
         Self {
             no_size: cli.no_size,
+            include_tracked: cli.include_tracked,
             enabled: cli.adapters.enabled.clone(),
         }
     }
@@ -76,7 +80,7 @@ pub fn scan_enabled(root: &Path, cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> 
 #[cfg(test)]
 pub fn scan_with(adapter: impl Adapter, root: &Path) -> Vec<CleanTarget> {
     let mut all: Vec<CleanTarget> = Vec::new();
-    walk(root, &[&adapter], false, false, &mut |t| all.push(t));
+    walk(root, &[&adapter], false, false, true, &mut |t| all.push(t));
     all.sort_by(|a, b| a.path.cmp(&b.path));
     all
 }
@@ -94,6 +98,7 @@ pub fn scan_streaming(
         &cfg.entry_adapters(),
         cfg.gitignore_enabled(),
         cfg.no_size,
+        cfg.include_tracked,
         on_found,
     );
     Ok(())
@@ -105,11 +110,14 @@ fn walk(
     adapters: &[&dyn Adapter],
     gitignore: bool,
     no_size: bool,
+    include_tracked: bool,
     on_found: &mut dyn FnMut(CleanTarget),
 ) {
     let mut out = Emitter {
         emitted: HashSet::new(),
         no_size,
+        include_tracked,
+        tracked: TrackedIndex::default(),
         on_found,
     };
 
@@ -244,6 +252,7 @@ fn judge(
             (false, false) => entry.metadata().map(|m| m.len()).unwrap_or(0),
         };
         let target = CleanTarget {
+            tracked: false,
             path: path.to_path_buf(),
             adapter,
             description,
@@ -261,11 +270,19 @@ fn judge(
 struct Emitter<'a> {
     emitted: HashSet<PathBuf>,
     no_size: bool,
+    include_tracked: bool,
+    tracked: TrackedIndex,
     on_found: &'a mut dyn FnMut(CleanTarget),
 }
 
 impl Emitter<'_> {
+    /// Report `target`, unless it was reported already or it contains
+    /// tracked files that are not wanted.
     fn emit(&mut self, mut target: CleanTarget) {
+        target.tracked = self.tracked.is_tracked(&target.path);
+        if target.tracked && !self.include_tracked {
+            return;
+        }
         if self.emitted.insert(target.path.clone()) {
             if self.no_size {
                 target.size = 0;
