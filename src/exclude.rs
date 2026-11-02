@@ -38,7 +38,7 @@ impl Anchored {
         let lexical = parts[..literal]
             .iter()
             .fold(home.to_path_buf(), |dir, part| dir.join(part));
-        let base = lexical.canonicalize().unwrap_or(lexical);
+        let base = dunce::canonicalize(&lexical).unwrap_or(lexical);
         let rest = if literal == parts.len() {
             None
         } else {
