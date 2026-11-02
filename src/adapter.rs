@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -80,14 +81,20 @@ pub trait Adapter: Send + Sync {
 
 /// Compute the total byte count for a directory tree, best-effort.
 /// Symlinks are not followed; errors on individual entries are skipped.
+/// Sub-directories are measured in parallel on the rayon thread pool.
 pub fn compute_dir_size(path: &Path) -> u64 {
-    walkdir::WalkDir::new(path)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.metadata().ok())
-        .filter(|m| m.is_file())
-        .map(|m| m.len())
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    let entries: Vec<_> = entries.flatten().collect();
+    entries
+        .par_iter()
+        .map(|entry| match entry.file_type() {
+            // `DirEntry::file_type` does not follow symlinks.
+            Ok(t) if t.is_dir() => compute_dir_size(&entry.path()),
+            Ok(t) if t.is_file() => entry.metadata().map(|m| m.len()).unwrap_or(0),
+            _ => 0,
+        })
         .sum()
 }
 
@@ -113,6 +120,32 @@ mod tests {
         let mut ctx = Context::default();
         assert!(ctx.has_extension(dir.path(), "py"));
         assert!(!ctx.has_extension(dir.path(), "opam"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compute_dir_size_does_not_follow_symlinks() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        fs::write(outside.path().join("big"), [0u8; 1000]).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+        fs::write(dir.path().join("a"), b"abc").unwrap();
+        assert_eq!(compute_dir_size(dir.path()), 3);
+    }
+
+    #[test]
+    fn compute_dir_size_sums_deep_tree() {
+        let dir = TempDir::new().unwrap();
+        let mut expected = 0;
+        for i in 0..5 {
+            let sub = dir.path().join(format!("d{i}")).join("x").join("y");
+            fs::create_dir_all(&sub).unwrap();
+            for j in 0..10 {
+                fs::write(sub.join(format!("f{j}")), vec![0u8; i + j]).unwrap();
+                expected += (i + j) as u64;
+            }
+        }
+        assert_eq!(compute_dir_size(dir.path()), expected);
     }
 
     #[test]
