@@ -83,17 +83,34 @@ pub trait Adapter: Send + Sync {
 /// Symlinks are not followed; errors on individual entries are skipped.
 /// Sub-directories are measured in parallel on the rayon thread pool.
 pub fn compute_dir_size(path: &Path) -> u64 {
+    /// An entry with its directory handle already released.
+    enum Item {
+        Dir(PathBuf),
+        File(u64),
+    }
+
     let Ok(entries) = std::fs::read_dir(path) else {
         return 0;
     };
-    let entries: Vec<_> = entries.flatten().collect();
-    entries
-        .par_iter()
-        .map(|entry| match entry.file_type() {
+    // Collect owned data and drop the entries before recursing: on Unix
+    // every `DirEntry` keeps its directory handle open, so holding them
+    // would keep one handle per level open on deep trees.
+    let items: Vec<Item> = entries
+        .flatten()
+        .filter_map(|entry| match entry.file_type() {
             // `DirEntry::file_type` does not follow symlinks.
-            Ok(t) if t.is_dir() => compute_dir_size(&entry.path()),
-            Ok(t) if t.is_file() => entry.metadata().map(|m| m.len()).unwrap_or(0),
-            _ => 0,
+            Ok(t) if t.is_dir() => Some(Item::Dir(entry.path())),
+            Ok(t) if t.is_file() => {
+                Some(Item::File(entry.metadata().map(|m| m.len()).unwrap_or(0)))
+            }
+            _ => None,
+        })
+        .collect();
+    items
+        .par_iter()
+        .map(|item| match item {
+            Item::Dir(dir) => compute_dir_size(dir),
+            Item::File(len) => *len,
         })
         .sum()
 }
@@ -146,6 +163,20 @@ mod tests {
             }
         }
         assert_eq!(compute_dir_size(dir.path()), expected);
+    }
+
+    /// Holding a directory handle per level would exhaust file descriptors
+    /// on deep trees under a low limit (try `ulimit -n 64`).
+    #[test]
+    fn compute_dir_size_handles_deep_tree() {
+        let dir = TempDir::new().unwrap();
+        let mut deepest = dir.path().to_path_buf();
+        for _ in 0..100 {
+            deepest.push("d");
+        }
+        fs::create_dir_all(&deepest).unwrap();
+        fs::write(deepest.join("f"), [0u8; 1000]).unwrap();
+        assert_eq!(compute_dir_size(dir.path()), 1000);
     }
 
     #[test]
