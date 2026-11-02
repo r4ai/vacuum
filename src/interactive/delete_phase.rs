@@ -141,7 +141,7 @@ fn render_delete_body(frame: &mut ratatui::Frame, state: &DeletingState, area: R
 
     // Stats
     let elapsed = state.start.elapsed().as_secs_f64();
-    let freed_str = ByteSize(state.freed).to_string();
+    let freed_str = ByteSize(state.freed).display().si().to_string();
     let stats_line = if state.finished {
         let status = if state.dry_run {
             "Dry run complete"

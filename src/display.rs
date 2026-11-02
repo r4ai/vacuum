@@ -22,7 +22,8 @@ pub fn print_targets(targets: &[CleanTarget], root: &Path) {
         targets
             .len()
             .if_supports_color(Stream::Stdout, |t| t.yellow()),
-        format!("({})", ByteSize(total)).if_supports_color(Stream::Stdout, |t| t.bright_black()),
+        format!("({})", ByteSize(total).display().si())
+            .if_supports_color(Stream::Stdout, |t| t.bright_black()),
     );
 
     for t in targets {
@@ -31,7 +32,7 @@ pub fn print_targets(targets: &[CleanTarget], root: &Path) {
             "  {}  {}  {}",
             format!("[{}]", t.adapter).if_supports_color(Stream::Stdout, |s| s.cyan()),
             rel.display(),
-            format!("({})", ByteSize(t.size))
+            format!("({})", ByteSize(t.size).display().si())
                 .if_supports_color(Stream::Stdout, |s| s.bright_black()),
         );
     }
@@ -60,7 +61,10 @@ pub fn print_final_report(freed: u64, errors: &[(String, String)], dry_run: bool
     println!(
         "\n{} Freed {}",
         "✓".if_supports_color(Stream::Stdout, |t| t.green()),
-        ByteSize(freed).if_supports_color(Stream::Stdout, |t| t.green()),
+        ByteSize(freed)
+            .display()
+            .si()
+            .if_supports_color(Stream::Stdout, |t| t.green()),
     );
 
     if !errors.is_empty() {
