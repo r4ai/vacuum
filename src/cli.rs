@@ -180,10 +180,14 @@ mod tests {
 
     #[test]
     fn safe_adapters_are_enabled_by_default() {
-        assert_eq!(
-            enabled(&[]),
-            vec!["cargo", "go", "gradle", "maven", "node", "ocaml", "python"]
-        );
+        // Every adapter but the dangerous gitignore one.
+        let mut expected: Vec<_> = REGISTRY
+            .iter()
+            .map(|spec| spec.name)
+            .filter(|name| *name != "gitignore")
+            .collect();
+        expected.sort();
+        assert_eq!(enabled(&[]), expected);
     }
 
     #[test]
