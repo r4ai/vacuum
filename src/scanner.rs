@@ -228,7 +228,31 @@ pub fn scan_streaming(
         return Ok(());
     }
 
-    let mut seen_paths: HashSet<PathBuf> = HashSet::new();
+    // Gitignore matches are computed up front so that the walk below can
+    // emit whichever of a gitignore match and an adapter match is the
+    // ancestor. A target is never emitted together with its descendant.
+    let mut ignored: HashMap<PathBuf, CleanTarget> = HashMap::new();
+    if cfg.gitignore {
+        let gitignore = GitignoreAdapter;
+        match gitignore.scan(root) {
+            Ok(targets) => {
+                ignored.extend(targets.into_iter().map(|t| (t.path.clone(), t)));
+            }
+            Err(e) => eprintln!("Warning: adapter '{}' failed: {e}", gitignore.name()),
+        }
+    }
+
+    let mut emitted: HashSet<PathBuf> = HashSet::new();
+    let emit = |mut target: CleanTarget,
+                emitted: &mut HashSet<PathBuf>,
+                on_found: &mut dyn FnMut(CleanTarget)| {
+        if emitted.insert(target.path.clone()) {
+            if cfg.no_size {
+                target.size = 0;
+            }
+            on_found(target);
+        }
+    };
     let mut iter = WalkDir::new(root).follow_links(false).into_iter();
     let mut node_context_cache: HashMap<PathBuf, bool> = HashMap::new();
     let mut cargo_context_cache: HashMap<PathBuf, bool> = HashMap::new();
@@ -312,25 +336,30 @@ pub fn scan_streaming(
             }
 
             if let Some((adapter, description)) = matched {
-                let path_buf = path.to_path_buf();
-                if seen_paths.insert(path_buf.clone()) {
-                    let size = if cfg.no_size {
-                        0
-                    } else {
-                        compute_dir_size(path)
-                    };
-                    on_found(CleanTarget {
-                        path: path_buf,
+                let size = if cfg.no_size {
+                    0
+                } else {
+                    compute_dir_size(path)
+                };
+                emit(
+                    CleanTarget {
+                        path: path.to_path_buf(),
                         adapter,
                         description,
                         size,
-                    });
-                }
+                    },
+                    &mut emitted,
+                    on_found,
+                );
+                iter.skip_current_dir();
+            } else if let Some(target) = ignored.remove(path) {
+                emit(target, &mut emitted, on_found);
                 iter.skip_current_dir();
             }
-        } else if entry.file_type().is_file() && cfg.python {
+        } else if entry.file_type().is_file() {
             let name = entry.file_name().to_string_lossy();
-            let is_project_bytecode = name.ends_with(".pyc")
+            let is_project_bytecode = cfg.python
+                && name.ends_with(".pyc")
                 && path.parent().is_some_and(|parent| {
                     has_python_bytecode_context_cached(
                         &mut python_context_cache,
@@ -339,38 +368,35 @@ pub fn scan_streaming(
                     )
                 });
             if is_project_bytecode {
-                let path_buf = path.to_path_buf();
-                if seen_paths.insert(path_buf.clone()) {
-                    let size = if cfg.no_size {
-                        0
-                    } else {
-                        entry.metadata().map(|m| m.len()).unwrap_or(0)
-                    };
-                    on_found(CleanTarget {
-                        path: path_buf,
+                let size = if cfg.no_size {
+                    0
+                } else {
+                    entry.metadata().map(|m| m.len()).unwrap_or(0)
+                };
+                emit(
+                    CleanTarget {
+                        path: path.to_path_buf(),
                         adapter: "python",
                         description: "Python bytecode (.pyc)".into(),
                         size,
-                    });
-                }
+                    },
+                    &mut emitted,
+                    on_found,
+                );
+            } else if let Some(target) = ignored.remove(path) {
+                emit(target, &mut emitted, on_found);
             }
         }
     }
 
-    if cfg.gitignore {
-        let gitignore = GitignoreAdapter;
-        match gitignore.scan(root) {
-            Ok(targets) => {
-                for mut target in targets {
-                    if seen_paths.insert(target.path.clone()) {
-                        if cfg.no_size {
-                            target.size = 0;
-                        }
-                        on_found(target);
-                    }
-                }
-            }
-            Err(e) => eprintln!("Warning: adapter '{}' failed: {e}", gitignore.name()),
+    // Gitignore matches the walk did not reach. Those inside an emitted
+    // target are already covered by it.
+    let mut rest: Vec<CleanTarget> = ignored.into_values().collect();
+    rest.sort_by(|a, b| a.path.cmp(&b.path));
+    for target in rest {
+        let covered = target.path.ancestors().any(|a| emitted.contains(a));
+        if !covered {
+            emit(target, &mut emitted, on_found);
         }
     }
 

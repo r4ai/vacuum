@@ -1,4 +1,4 @@
-use ignore::gitignore::GitignoreBuilder;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::path::Path;
 use walkdir::WalkDir;
 
@@ -19,6 +19,26 @@ fn contains_git_root(dir: &Path) -> bool {
         .into_iter()
         .filter_map(|e| e.ok())
         .any(|e| e.file_name() == ".git")
+}
+
+/// Whether any descendant of `dir` is re-included by a negation pattern
+/// (e.g. `!build/keep.txt`). Such a directory must not be deleted as a whole.
+fn contains_whitelisted(gitignore: &Gitignore, root: &Path, dir: &Path) -> bool {
+    if gitignore.num_whitelists() == 0 {
+        return false;
+    }
+    WalkDir::new(dir)
+        .min_depth(1)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .any(|e| {
+            e.path().strip_prefix(root).is_ok_and(|relative| {
+                gitignore
+                    .matched(relative, e.file_type().is_dir())
+                    .is_whitelist()
+            })
+        })
 }
 
 impl Adapter for GitignoreAdapter {
@@ -80,6 +100,12 @@ impl Adapter for GitignoreAdapter {
                 // An ignored directory may hold a worktree or repository,
                 // e.g. `.claude/worktrees/<name>`. Walk into it instead.
                 if is_dir && contains_git_root(path) {
+                    continue;
+                }
+
+                // Likewise, walk into an ignored directory that holds a path
+                // re-included by a negation pattern, and keep that path.
+                if is_dir && contains_whitelisted(&gitignore, root, path) {
                     continue;
                 }
 
@@ -209,6 +235,19 @@ mod tests {
 
         let targets = GitignoreAdapter.scan(dir.path()).unwrap();
         assert!(targets.is_empty(), "unexpected targets: {targets:?}");
+    }
+
+    #[test]
+    fn whitelisted_file_inside_ignored_dir_is_kept() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join(".gitignore"), "build/\n!build/keep.txt\n").unwrap();
+        fs::create_dir(dir.path().join("build")).unwrap();
+        fs::write(dir.path().join("build").join("keep.txt"), "").unwrap();
+        fs::write(dir.path().join("build").join("out.o"), "").unwrap();
+
+        let targets = GitignoreAdapter.scan(dir.path()).unwrap();
+        let paths: Vec<_> = targets.iter().map(|t| t.path.clone()).collect();
+        assert_eq!(paths, vec![dir.path().join("build").join("out.o")]);
     }
 
     #[test]

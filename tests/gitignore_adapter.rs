@@ -164,3 +164,68 @@ fn default_adapters_clean_inside_claude_code_worktree() {
     assert!(worktree.join("package.json").exists());
     assert!(worktree.join("main.rs").exists());
 }
+
+#[test]
+fn gitignore_adapter_keeps_whitelisted_file_inside_ignored_dir() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::make_file(&root.join(".gitignore"), b"build/\n!build/keep.txt\n");
+    common::make_file(&root.join("build").join("keep.txt"), b"keep");
+    common::make_file(&root.join("build").join("out.o"), b"obj");
+
+    let status = Command::new(common::vacuum_bin())
+        .arg(root)
+        .args(GITIGNORE_ONLY)
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert!(
+        root.join("build").join("keep.txt").exists(),
+        "whitelisted build/keep.txt must be preserved"
+    );
+    assert!(
+        !root.join("build").join("out.o").exists(),
+        "build/out.o should be deleted"
+    );
+}
+
+#[test]
+fn gitignore_adapter_keeps_whitelisted_file_with_star_pattern() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::make_file(&root.join(".gitignore"), b"build/*\n!build/keep.txt\n");
+    common::make_file(&root.join("build").join("keep.txt"), b"keep");
+    common::make_file(&root.join("build").join("out.o"), b"obj");
+
+    let status = Command::new(common::vacuum_bin())
+        .arg(root)
+        .args(GITIGNORE_ONLY)
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert!(root.join("build").join("keep.txt").exists());
+    assert!(!root.join("build").join("out.o").exists());
+}
+
+#[test]
+fn gitignore_adapter_keeps_whitelisted_file_in_nested_ignored_dir() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::make_file(&root.join(".gitignore"), b"build/\n!build/sub/keep.txt\n");
+    common::make_file(&root.join("build").join("sub").join("keep.txt"), b"keep");
+    common::make_file(&root.join("build").join("sub").join("out.o"), b"obj");
+    common::make_file(&root.join("build").join("other").join("a.o"), b"obj");
+
+    let status = Command::new(common::vacuum_bin())
+        .arg(root)
+        .args(GITIGNORE_ONLY)
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert!(root.join("build").join("sub").join("keep.txt").exists());
+    assert!(!root.join("build").join("sub").join("out.o").exists());
+    assert!(!root.join("build").join("other").exists());
+}
