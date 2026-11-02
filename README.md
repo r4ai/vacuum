@@ -114,6 +114,16 @@ vacuum ~/projects --mode list --json | jq '.total_size'
 
 `--trash` のときは、ゴミ箱に移した量を `freed` ではなく `trashed` に入れる。ゴミ箱の中身はディスクを使い続けるため。
 
+### 出力量を調整する
+
+- `--quiet`（`-q`）: list モードと auto モードで、エラーと最終結果の 1 行だけを出す。cron などで使う。
+- `--verbose`（`-v`）: list モードと auto モードで、絞り込み（除外、git 管理、期間、サイズ、マウント）で外した候補と、その理由を標準エラーに出す。誤検知を調べるときに使う。
+
+```sh
+$ vacuum ~/projects --mode auto --quiet
+Freed 1.2 GB (42 targets)
+```
+
 ### 終了コード
 
 削除に 1 件でも失敗すると、終了コード 1 で終わる。スクリプトや CI から失敗を検知できる。

@@ -66,6 +66,14 @@ pub struct Cli {
     #[arg(long)]
     pub json: bool,
 
+    /// Print only errors and the final result (list and auto modes)
+    #[arg(short, long, conflicts_with = "verbose")]
+    pub quiet: bool,
+
+    /// Explain why each dropped target was skipped (list and auto modes)
+    #[arg(short, long)]
+    pub verbose: bool,
+
     /// Skip size calculation to speed up scanning [default: off]
     #[arg(long, default_value_t = false, help_heading = "Performance")]
     pub no_size: bool,

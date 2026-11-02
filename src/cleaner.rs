@@ -127,53 +127,47 @@ pub fn delete_targets(
     targets: &[CleanTarget],
     dry_run: bool,
     method: DeleteMethod,
-) -> anyhow::Result<()> {
-    if targets.is_empty() {
-        println!("Nothing to delete.");
-        return Ok(());
-    }
-
+    quiet: bool,
+) -> DeleteReport {
     if dry_run {
-        println!("Dry run — the following would be deleted:");
-        let total: u64 = targets.iter().map(|t| t.size).sum();
-        for t in targets {
-            println!(
-                "  {}  ({})",
-                t.path.display(),
-                ByteSize(t.size).display().si()
-            );
+        if !quiet && !targets.is_empty() {
+            println!("Dry run — the following would be deleted:");
+            for t in targets {
+                println!(
+                    "  {}  ({})",
+                    t.path.display(),
+                    ByteSize(t.size).display().si()
+                );
+            }
+            println!();
         }
-        println!("\nTotal: {}", ByteSize(total).display().si());
-        return Ok(());
+        return DeleteReport::default();
     }
 
-    let pb = ProgressBar::new(targets.len() as u64);
+    let pb = if quiet {
+        ProgressBar::hidden()
+    } else {
+        ProgressBar::new(targets.len() as u64)
+    };
     pb.set_style(
         ProgressStyle::with_template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len}  {msg}")
             .unwrap()
             .progress_chars("=>-"),
     );
 
-    let DeleteReport { freed, errors } = remove_all(targets, method, |target| {
+    let report = remove_all(targets, method, |target| {
         pb.set_message(format!("{}", target.path.display()));
         pb.inc(1);
     });
+    pb.finish_and_clear();
 
-    pb.finish_with_message(format!(
-        "Done. {} {}",
-        method.done_label(),
-        ByteSize(freed).display().si()
-    ));
-
-    if !errors.is_empty() {
-        eprintln!("\nErrors during deletion:");
-        for (path, err) in &errors {
+    if !report.errors.is_empty() {
+        eprintln!("Errors during deletion:");
+        for (path, err) in &report.errors {
             eprintln!("  {path}: {err}");
         }
-        anyhow::bail!("failed to delete {} target(s)", errors.len());
     }
-
-    Ok(())
+    report
 }
 
 #[cfg(test)]
@@ -192,7 +186,8 @@ mod tests {
             description: "test".into(),
             size: 0,
         };
-        assert!(delete_targets(&[missing], false, DeleteMethod::Remove).is_err());
+        let report = delete_targets(&[missing], false, DeleteMethod::Remove, true);
+        assert_eq!(report.errors.len(), 1);
     }
 
     #[test]
@@ -207,7 +202,9 @@ mod tests {
             description: "test".into(),
             size: 1,
         };
-        assert!(delete_targets(&[target], false, DeleteMethod::Remove).is_ok());
+        let report = delete_targets(&[target], false, DeleteMethod::Remove, true);
+        assert!(report.errors.is_empty());
+        assert_eq!(report.freed, 1);
         assert!(!path.exists());
     }
 }

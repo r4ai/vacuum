@@ -43,6 +43,43 @@ pub fn print_targets(targets: &[CleanTarget], root: &Path) {
     println!();
 }
 
+/// Print the one-line result of a list or auto run.
+/// `freed` and `removed` are ignored on a dry run.
+pub fn print_summary(
+    targets: &[CleanTarget],
+    freed: u64,
+    removed: usize,
+    dry_run: bool,
+    method: DeleteMethod,
+) {
+    println!("{}", summary_line(targets, freed, removed, dry_run, method));
+}
+
+fn summary_line(
+    targets: &[CleanTarget],
+    freed: u64,
+    removed: usize,
+    dry_run: bool,
+    method: DeleteMethod,
+) -> String {
+    let count = |n: usize| format!("{n} target{}", if n == 1 { "" } else { "s" });
+    if dry_run {
+        let total: u64 = targets.iter().map(|t| t.size).sum();
+        format!(
+            "Would free {} ({})",
+            ByteSize(total).display().si(),
+            count(targets.len())
+        )
+    } else {
+        format!(
+            "{} {} ({})",
+            method.done_label(),
+            ByteSize(freed).display().si(),
+            count(removed)
+        )
+    }
+}
+
 pub fn print_cancelled() {
     println!(
         "{}",
