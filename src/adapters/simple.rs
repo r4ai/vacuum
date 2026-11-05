@@ -179,7 +179,6 @@ pub static ZIG: SimpleAdapter = SimpleAdapter {
         unless_inside: &[],
     }],
 };
-
 #[cfg(test)]
 mod tests {
     use super::*;

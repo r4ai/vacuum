@@ -38,7 +38,7 @@ impl Anchored {
         let lexical = parts[..literal]
             .iter()
             .fold(home.to_path_buf(), |dir, part| dir.join(part));
-        let base = lexical.canonicalize().unwrap_or(lexical);
+        let base = dunce::canonicalize(&lexical).unwrap_or(lexical);
         let rest = if literal == parts.len() {
             None
         } else {
@@ -144,7 +144,8 @@ impl Excludes {
 /// The canonical home directory, if known.
 fn home_dir() -> Option<PathBuf> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
-    Some(home.canonicalize().unwrap_or(home))
+    // `dunce` avoids Windows' `\\?\C:\...` form, like the scan roots.
+    Some(dunce::canonicalize(&home).unwrap_or(home))
 }
 
 #[cfg(test)]

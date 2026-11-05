@@ -17,8 +17,8 @@ impl Roots {
     pub fn resolve(paths: &[PathBuf]) -> anyhow::Result<Self> {
         let mut dirs = Vec::new();
         for path in paths {
-            let dir = path
-                .canonicalize()
+            // `dunce` avoids Windows' `\\?\C:\...` form where it can.
+            let dir = dunce::canonicalize(path)
                 .with_context(|| format!("Cannot access path: {}", path.display()))?;
             if !dir.is_dir() {
                 anyhow::bail!("{} is not a directory", dir.display());
