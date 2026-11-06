@@ -203,7 +203,7 @@ mod tests {
 
     /// Render the adapter selection screen and return its rows as text.
     fn rendered_rows(cfg: ScanConfig) -> Vec<String> {
-        let mut terminal = Terminal::new(TestBackend::new(120, 20)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
         let mut state = AdapterSelectionState::new(cfg);
         terminal
             .draw(|frame| render_adapter_selection(frame, &mut state))

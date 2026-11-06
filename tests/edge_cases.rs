@@ -36,6 +36,9 @@ fn all_adapters_disabled_exits_cleanly() {
             "--gradle=false",
             "--maven=false",
             "--ocaml=false",
+            "--zig=false",
+            "--elixir=false",
+            "--haskell=false",
             "--swift=false",
             "--dotnet=false",
         ])
