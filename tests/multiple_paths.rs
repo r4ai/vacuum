@@ -63,6 +63,8 @@ fn paths_are_shown_relative_to_their_common_ancestor() {
         .unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("work/node_modules"), "{stdout}");
-    assert!(stdout.contains("oss/node_modules"), "{stdout}");
+    for project in ["work", "oss"] {
+        let shown = std::path::Path::new(project).join("node_modules");
+        assert!(stdout.contains(&*shown.to_string_lossy()), "{stdout}");
+    }
 }
