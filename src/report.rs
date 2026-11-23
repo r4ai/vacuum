@@ -4,13 +4,23 @@ use serde::Serialize;
 
 use crate::adapter::CleanTarget;
 use crate::cleaner::{DeleteMethod, DeleteReport};
+use crate::skipped::SkippedPaths;
 
 #[derive(Serialize)]
 struct Report<'a> {
     targets: Vec<Target<'a>>,
     /// Sum of the targets' sizes in bytes.
     total_size: u64,
+    /// Paths the scan could not read, e.g. for lack of permission.
+    skipped: Vec<Skipped<'a>>,
     result: Outcome<'a>,
+}
+
+#[derive(Serialize)]
+struct Skipped<'a> {
+    /// Non-UTF-8 bytes are replaced.
+    path: String,
+    error: &'a str,
 }
 
 #[derive(Serialize)]
@@ -46,6 +56,7 @@ struct Error<'a> {
 /// The JSON document for `targets` and the outcome of deleting them.
 pub fn to_json(
     targets: &[CleanTarget],
+    skipped: &SkippedPaths,
     outcome: &DeleteReport,
     dry_run: bool,
     method: DeleteMethod,
@@ -66,6 +77,13 @@ pub fn to_json(
             })
             .collect(),
         total_size: targets.iter().map(|t| t.size).sum(),
+        skipped: skipped
+            .iter()
+            .map(|(path, error)| Skipped {
+                path: path.display().to_string(),
+                error,
+            })
+            .collect(),
         result: Outcome {
             dry_run,
             method: method_name,

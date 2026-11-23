@@ -1,3 +1,4 @@
+use crate::skipped::SkippedPaths;
 use std::io::{self, IsTerminal as _};
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -64,6 +65,7 @@ fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     roots: &Roots,
     cli: &Cli,
+    skipped: &mut SkippedPaths,
 ) -> anyhow::Result<TuiResult> {
     let mut phase = Phase::AdapterSelection(AdapterSelectionState::new(ScanConfig::from(cli)));
 
@@ -80,6 +82,7 @@ fn run_loop(
         match &mut phase {
             Phase::Scanning(s) => {
                 s.drain();
+                skipped.extend(std::mem::take(&mut s.skipped));
                 // Auto-transition when scan completes
                 if s.done {
                     let targets = std::mem::take(&mut s.found);
@@ -252,7 +255,13 @@ fn install_panic_hook() {
 
 /// Run the full safe-mode TUI workflow:
 /// adapter selection → scanning → target selection → deletion.
-pub fn run_tui_flow(roots: &Roots, cli: &Cli) -> anyhow::Result<TuiResult> {
+/// Paths the scan could not read are added to `skipped`, for the caller
+/// to report once the terminal is restored.
+pub fn run_tui_flow(
+    roots: &Roots,
+    cli: &Cli,
+    skipped: &mut SkippedPaths,
+) -> anyhow::Result<TuiResult> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         anyhow::bail!(
             "safe mode requires an interactive terminal.\n\
@@ -271,7 +280,7 @@ pub fn run_tui_flow(roots: &Roots, cli: &Cli) -> anyhow::Result<TuiResult> {
     let result = entered.and_then(|()| {
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend).context("Failed to create terminal")?;
-        run_loop(&mut terminal, roots, cli)
+        run_loop(&mut terminal, roots, cli, skipped)
     });
 
     // Always restore terminal, even on error
