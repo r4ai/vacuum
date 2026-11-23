@@ -9,11 +9,14 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::adapter::CleanTarget;
 use crate::scanner::{ScanConfig, scan_streaming};
+use crate::skipped::SkippedPaths;
 
 // ─── Background message ───────────────────────────────────────────────────────
 
 pub enum ScanMsg {
     Found(CleanTarget),
+    /// Paths of one root that could not be read.
+    Skipped(SkippedPaths),
     Done,
 }
 
@@ -22,6 +25,8 @@ pub enum ScanMsg {
 pub struct ScanningState {
     pub rx: mpsc::Receiver<ScanMsg>,
     pub found: Vec<CleanTarget>,
+    /// Reported after the TUI exits, since printing would corrupt it.
+    pub skipped: SkippedPaths,
     pub start: Instant,
     pub done: bool,
 }
@@ -32,15 +37,19 @@ impl ScanningState {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             for root in &roots {
-                let _ = scan_streaming(root, &cfg, &mut |target| {
+                let result = scan_streaming(root, &cfg, &mut |target| {
                     let _ = tx.send(ScanMsg::Found(target));
                 });
+                if let Ok(skipped) = result {
+                    let _ = tx.send(ScanMsg::Skipped(skipped));
+                }
             }
             let _ = tx.send(ScanMsg::Done);
         });
         Self {
             rx,
             found: Vec::new(),
+            skipped: SkippedPaths::default(),
             start: Instant::now(),
             done: false,
         }
@@ -51,6 +60,7 @@ impl ScanningState {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 ScanMsg::Found(t) => self.found.push(t),
+                ScanMsg::Skipped(s) => self.skipped.extend(s),
                 ScanMsg::Done => self.done = true,
             }
         }

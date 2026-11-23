@@ -13,6 +13,7 @@ mod interactive;
 mod report;
 mod roots;
 mod scanner;
+mod skipped;
 mod tracked;
 
 use cli::{Cli, Mode};
@@ -57,29 +58,35 @@ fn run() -> anyhow::Result<()> {
 
     match cli.mode {
         // ── Safe mode: full TUI workflow ──────────────────────────────────────
-        Mode::Safe => match interactive::run_tui_flow(&roots, &cli)? {
-            TuiResult::Cancelled => display::print_cancelled(),
-            TuiResult::Completed {
-                freed,
-                errors,
-                targets,
-            } => {
-                display::print_final_report(
+        Mode::Safe => {
+            let mut skipped = skipped::SkippedPaths::default();
+            let result = interactive::run_tui_flow(&roots, &cli, &mut skipped);
+            // Printed only once the TUI has given the terminal back.
+            display::print_skipped(&skipped);
+            match result? {
+                TuiResult::Cancelled => display::print_cancelled(),
+                TuiResult::Completed {
                     freed,
-                    &errors,
-                    &targets,
-                    cli.dry_run,
-                    cli.delete_method(),
-                );
-                if !errors.is_empty() {
-                    anyhow::bail!("failed to delete {} target(s)", errors.len());
+                    errors,
+                    targets,
+                } => {
+                    display::print_final_report(
+                        freed,
+                        &errors,
+                        &targets,
+                        cli.dry_run,
+                        cli.delete_method(),
+                    );
+                    if !errors.is_empty() {
+                        anyhow::bail!("failed to delete {} target(s)", errors.len());
+                    }
                 }
             }
-        },
+        }
 
         // ── JSON output: list mode or auto mode ──────────────────────────────
         Mode::List | Mode::Auto if cli.json => {
-            let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
+            let scanner::Scan { targets, skipped } = scanner::scan_enabled(&roots.dirs, &cli)?;
             let dry_run = cli.dry_run || cli.mode == Mode::List;
             let outcome = if dry_run {
                 cleaner::DeleteReport::default()
@@ -88,7 +95,7 @@ fn run() -> anyhow::Result<()> {
             };
             println!(
                 "{}",
-                report::to_json(&targets, &outcome, dry_run, cli.delete_method())
+                report::to_json(&targets, &skipped, &outcome, dry_run, cli.delete_method())
             );
             if !outcome.errors.is_empty() {
                 anyhow::bail!("failed to delete {} target(s)", outcome.errors.len());
@@ -97,12 +104,13 @@ fn run() -> anyhow::Result<()> {
 
         // ── List mode: print the targets, never delete ───────────────────────
         Mode::List => {
-            let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
+            let scanner::Scan { targets, skipped } = scanner::scan_enabled(&roots.dirs, &cli)?;
             if cli.quiet {
                 display::print_summary(&targets, 0, 0, true, cli.delete_method());
             } else {
                 display::print_targets(&targets, &roots.base);
             }
+            display::print_skipped(&skipped);
         }
 
         // ── Auto mode: non-interactive scan + delete ─────────────────────────
@@ -117,11 +125,12 @@ fn run() -> anyhow::Result<()> {
                     roots.dirs.iter().map(|d| d.display().to_string()).collect();
                 eprintln!("Scanning {} ...", names.join(", "));
             }
-            let targets = scanner::scan_enabled(&roots.dirs, &cli)?;
+            let scanner::Scan { targets, skipped } = scanner::scan_enabled(&roots.dirs, &cli)?;
 
             if !cli.quiet {
                 display::print_targets(&targets, &roots.base);
             }
+            display::print_skipped(&skipped);
 
             let method = cli.delete_method();
             let report = cleaner::delete_targets(&targets, cli.dry_run, method, cli.quiet);

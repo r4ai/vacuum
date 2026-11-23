@@ -112,9 +112,12 @@ vacuum ~/projects --mode list --json | jq '.total_size'
       "description": "Node.js dependencies (node_modules/)", "size": 1234, "tracked": false }
   ],
   "total_size": 1234,
+  "skipped": [],
   "result": { "dry_run": true, "method": "remove", "freed": 0, "trashed": 0, "errors": [] }
 }
 ```
+
+`skipped` には、権限不足などで読めなかったパスとエラーが入る。
 
 `--trash` のときは、ゴミ箱に移した量を `freed` ではなく `trashed` に入れる。ゴミ箱の中身はディスクを使い続けるため。
 
@@ -169,6 +172,16 @@ gitignore = false
 
 `~/` で始まる除外パターンは、ホームディレクトリからの絶対パスとして扱う。それ以外は `--exclude` と同じく、スキャンルートからの相対パスとして扱う。
 未知のキーやアダプター名はエラーになる。
+
+### 読めなかったパス
+
+権限不足などで読めなかったパスは、最後に標準エラーへ一覧を出す。その中の候補は検出できていない。
+safe モードでは、TUI を閉じたあとに出す。
+
+```
+Could not read 1 path; targets inside were not checked:
+  /home/u/projects/locked: Permission denied (os error 13)
+```
 
 ### 終了コード
 

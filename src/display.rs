@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::adapter::CleanTarget;
 use crate::cleaner::DeleteMethod;
+use crate::skipped::SkippedPaths;
 
 /// Print a summary table of all discovered targets.
 pub fn print_targets(targets: &[CleanTarget], root: &Path) {
@@ -127,6 +128,23 @@ fn breakdown_lines(rows: &[(&str, usize, u64)]) -> Vec<String> {
 pub fn print_breakdown(targets: &[CleanTarget], failed: &[(String, String)]) {
     for line in breakdown_lines(&adapter_breakdown(targets, failed)) {
         println!("{line}");
+    }
+}
+
+/// Print the paths the scan could not read to stderr, if any.
+pub fn print_skipped(skipped: &SkippedPaths) {
+    if skipped.is_empty() {
+        return;
+    }
+    let count = skipped.len();
+    let noun = if count == 1 { "path" } else { "paths" };
+    eprintln!(
+        "{}",
+        format!("Could not read {count} {noun}; targets inside were not checked:")
+            .if_supports_color(Stream::Stderr, |t| t.yellow())
+    );
+    for (path, error) in skipped.iter() {
+        eprintln!("  {}: {error}", path.display());
     }
 }
 

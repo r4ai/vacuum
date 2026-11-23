@@ -4,6 +4,7 @@ use std::path::Path;
 use walkdir::WalkDir;
 
 use crate::adapter::{CleanTarget, EntryKind, WalkLimits, compute_dir_size, device_of, file_size};
+use crate::skipped::SkippedPaths;
 
 pub struct GitignoreAdapter;
 
@@ -101,16 +102,23 @@ impl GitignoreAdapter {
     /// match: every `.gitignore` in the tree, and `.git/info/exclude`.
     #[cfg(test)]
     pub fn scan(&self, root: &Path) -> anyhow::Result<Vec<CleanTarget>> {
-        self.scan_except(root, &|_, _| false, WalkLimits::default())
+        self.scan_except(
+            root,
+            &|_, _| false,
+            WalkLimits::default(),
+            &mut SkippedPaths::default(),
+        )
     }
 
     /// Like `scan`, but neither walks nor returns paths for which
     /// `excluded(path, is_dir)` holds, nor paths beyond `limits`.
+    /// Paths that cannot be read are recorded in `skipped`.
     pub fn scan_except(
         &self,
         root: &Path,
         excluded: &dyn Fn(&Path, bool) -> bool,
         limits: WalkLimits,
+        skipped: &mut SkippedPaths,
     ) -> anyhow::Result<Vec<CleanTarget>> {
         // `levels[d]` holds the rules of the directory at depth `d` on the
         // path to the current entry.
@@ -135,7 +143,10 @@ impl GitignoreAdapter {
         while let Some(entry) = iter.next() {
             let entry = match entry {
                 Ok(entry) => entry,
-                Err(_) => continue,
+                Err(error) => {
+                    skipped.add_walkdir_error(error, root);
+                    continue;
+                }
             };
             let path = entry.path();
 
@@ -175,7 +186,7 @@ impl GitignoreAdapter {
             // Never delete it as a whole; apply its own `.gitignore` instead.
             if is_dir && is_git_root(path) {
                 let depth = entry.depth();
-                targets.extend(self.scan_except(path, excluded, limits.below(depth))?);
+                targets.extend(self.scan_except(path, excluded, limits.below(depth), skipped)?);
                 iter.skip_current_dir();
                 continue;
             }
