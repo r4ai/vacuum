@@ -4,8 +4,10 @@ use crate::adapter::{Adapter, Context};
 
 pub struct GradleAdapter;
 
-const GRADLE_TARGETS: &[&str] = &[".gradle", "build"];
-const GRADLE_CONTEXT_FILES: &[&str] = &["build.gradle", "build.gradle.kts"];
+const BUILD_SCRIPTS: &[&str] = &["build.gradle", "build.gradle.kts"];
+/// A multi-project root may hold only a settings script. Gradle keeps
+/// its `.gradle/` there, but builds into `build/` only with a build script.
+const SETTINGS_SCRIPTS: &[&str] = &["settings.gradle", "settings.gradle.kts"];
 
 impl Adapter for GradleAdapter {
     fn name(&self) -> &'static str {
@@ -14,9 +16,16 @@ impl Adapter for GradleAdapter {
 
     fn match_dir(&self, name: &str, parent: &Path, ctx: &mut Context) -> Option<String> {
         // Check the name first so that unrelated directories cost no I/O.
-        (GRADLE_TARGETS.contains(&name)
-            && GRADLE_CONTEXT_FILES.iter().any(|f| ctx.has_file(parent, f)))
-        .then(|| format!("Gradle build artifact ({name}/)"))
+        let context: &[&[&str]] = match name {
+            ".gradle" => &[BUILD_SCRIPTS, SETTINGS_SCRIPTS],
+            "build" => &[BUILD_SCRIPTS],
+            _ => return None,
+        };
+        context
+            .iter()
+            .flat_map(|files| files.iter())
+            .any(|f| ctx.has_file(parent, f))
+            .then(|| format!("Gradle build artifact ({name}/)"))
     }
 }
 

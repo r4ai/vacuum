@@ -112,9 +112,12 @@ vacuum ~/projects --mode list --json | jq '.total_size'
       "description": "Node.js dependencies (node_modules/)", "size": 1234, "tracked": false }
   ],
   "total_size": 1234,
+  "skipped": [],
   "result": { "dry_run": true, "method": "remove", "freed": 0, "trashed": 0, "errors": [] }
 }
 ```
+
+`skipped` には、権限不足などで読めなかったパスとエラーが入る。
 
 `--trash` のときは、ゴミ箱に移した量を `freed` ではなく `trashed` に入れる。ゴミ箱の中身はディスクを使い続けるため。
 
@@ -127,6 +130,13 @@ vacuum ~/projects --mode list --json | jq '.total_size'
 $ vacuum ~/projects --mode auto --quiet
 Freed 1.2 GB (42 targets)
 ```
+
+### 表示するサイズ
+
+表示するサイズは、削除で実際に空く容量である。ファイルの長さではない。
+
+- Unix では、ファイルが占めるブロック数から計算する。スパースファイルは長さより小さく、小さいファイルは 1 ブロック分になる。
+- ハードリンクされたファイルは 1 回だけ数える。候補の外にもリンクがあるファイルは数えない。削除しても容量が空かないため。例えば pnpm の store とリンクした `node_modules/` は小さく表示される。
 
 ### 最終レポート
 
@@ -163,6 +173,16 @@ gitignore = false
 `~/` で始まる除外パターンは、ホームディレクトリからの絶対パスとして扱う。それ以外は `--exclude` と同じく、スキャンルートからの相対パスとして扱う。
 未知のキーやアダプター名はエラーになる。
 
+### 読めなかったパス
+
+権限不足などで読めなかったパスは、最後に標準エラーへ一覧を出す。その中の候補は検出できていない。
+safe モードでは、TUI を閉じたあとに出す。
+
+```
+Could not read 1 path; targets inside were not checked:
+  /home/u/projects/locked: Permission denied (os error 13)
+```
+
 ### 終了コード
 
 削除に 1 件でも失敗すると、終了コード 1 で終わる。スクリプトや CI から失敗を検知できる。
@@ -198,7 +218,7 @@ gitignore = false
 | `--antigravity` | `~/.gemini/antigravity` の `browser_recordings/`, `brain/`, `conversations/` 等 | **off** |
 | `--gemini-cli` | `~/.gemini/tmp/` | **off** |
 | `--aider` | `.aider.chat.history.md`, `.aider.input.history`, `.aider.tags.cache.v*/` 等 | **off** |
-| `--gitignore` | `.gitignore` にマッチするファイルすべて        | **off**（危険） |
+| `--gitignore` | 各ディレクトリの `.gitignore` と `.git/info/exclude` にマッチするファイルすべて | **off**（危険） |
 
 コンテキストファイル（`package.json`, `Cargo.toml` 等）が存在するディレクトリのみを対象とする。誤検知を防ぐためのガードとして機能する。
 

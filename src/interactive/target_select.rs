@@ -1155,6 +1155,7 @@ mod tests {
                 adapter: "node",
                 description: "test".into(),
                 size: 1500,
+                kind: Default::default(),
             })
             .collect();
         App::new(targets, PathBuf::from("/root"))

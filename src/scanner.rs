@@ -4,11 +4,14 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::adapter::{Adapter, CleanTarget, Context, DirStats, WalkLimits, device_of, dir_stats};
+use crate::adapter::{
+    Adapter, CleanTarget, Context, DirStats, EntryKind, WalkLimits, device_of, dir_stats, file_size,
+};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::age::AgeIndex;
 use crate::cli::{Cli, Mode};
 use crate::exclude::Excludes;
+use crate::skipped::SkippedPaths;
 use crate::tracked::TrackedIndex;
 
 /// Scanner settings extracted from CLI flags.
@@ -88,16 +91,25 @@ impl ScanConfig {
     }
 }
 
-/// Scan `roots` with the adapters enabled by `cli` and return the sorted
-/// targets.
-pub fn scan_enabled(roots: &[PathBuf], cli: &Cli) -> anyhow::Result<Vec<CleanTarget>> {
+/// What a scan found.
+#[derive(Debug, Default)]
+pub struct Scan {
+    /// The targets, sorted by path.
+    pub targets: Vec<CleanTarget>,
+    /// The paths the scan could not read.
+    pub skipped: SkippedPaths,
+}
+
+/// Scan `roots` with the adapters enabled by `cli`.
+pub fn scan_enabled(roots: &[PathBuf], cli: &Cli) -> anyhow::Result<Scan> {
     let cfg = ScanConfig::from(cli);
-    let mut all: Vec<CleanTarget> = Vec::new();
+    let mut scan = Scan::default();
     for root in roots {
-        scan_streaming(root, &cfg, &mut |t| all.push(t))?;
+        let skipped = scan_streaming(root, &cfg, &mut |t| scan.targets.push(t))?;
+        scan.skipped.extend(skipped);
     }
-    all.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(all)
+    scan.targets.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(scan)
 }
 
 /// Scan with only `adapter` enabled and return the sorted targets.
@@ -113,21 +125,29 @@ pub fn scan_with(adapter: impl Adapter, root: &Path) -> Vec<CleanTarget> {
         limits: WalkLimits::default(),
         verbose: false,
     };
-    walk(root, &[&adapter], false, false, &filters, &mut |t| {
-        all.push(t)
-    });
+    walk(
+        root,
+        &[&adapter],
+        false,
+        false,
+        &filters,
+        &mut |t| all.push(t),
+        &mut SkippedPaths::default(),
+    );
     all.sort_by(|a, b| a.path.cmp(&b.path));
     all
 }
 
-/// Stream discovered targets one-by-one via a callback.
+/// Stream discovered targets one-by-one via a callback, and return the
+/// paths that could not be read. Prints nothing, so that it can run
+/// under the TUI.
 /// Callers that need to run this off the main thread should wrap it in
 /// `std::thread::spawn` and pass a closure that sends through an `mpsc` channel.
 pub fn scan_streaming(
     root: &Path,
     cfg: &ScanConfig,
     on_found: &mut dyn FnMut(CleanTarget),
-) -> anyhow::Result<()> {
+) -> anyhow::Result<SkippedPaths> {
     let filters = Filters {
         excludes: Excludes::new(root, &cfg.exclude)?,
         include_tracked: cfg.include_tracked,
@@ -136,6 +156,7 @@ pub fn scan_streaming(
         limits: cfg.limits,
         verbose: cfg.verbose,
     };
+    let mut skipped = SkippedPaths::default();
     walk(
         root,
         &cfg.entry_adapters(),
@@ -143,8 +164,9 @@ pub fn scan_streaming(
         cfg.no_size,
         &filters,
         on_found,
+        &mut skipped,
     );
-    Ok(())
+    Ok(skipped)
 }
 
 /// Walk `root` once, asking `adapters` about each entry in order.
@@ -155,6 +177,7 @@ fn walk(
     no_size: bool,
     filters: &Filters,
     on_found: &mut dyn FnMut(CleanTarget),
+    skipped: &mut SkippedPaths,
 ) {
     let mut out = Emitter {
         emitted: HashSet::new(),
@@ -168,7 +191,7 @@ fn walk(
     if adapters.is_empty() {
         // Only gitignore can be enabled — no need for a second walk.
         if gitignore {
-            for target in scan_gitignore(root, filters) {
+            for target in scan_gitignore(root, filters, skipped) {
                 out.emit(target, None);
             }
         }
@@ -181,7 +204,7 @@ fn walk(
     let mut ignored: HashMap<PathBuf, CleanTarget> = HashMap::new();
     if gitignore {
         ignored.extend(
-            scan_gitignore(root, filters)
+            scan_gitignore(root, filters, skipped)
                 .into_iter()
                 .map(|t| (t.path.clone(), t)),
         );
@@ -208,6 +231,7 @@ fn walk(
                         out.emit(target, None);
                     }
                 }
+                Found::Skipped(error) => skipped.add_ignore_error(error, root),
             }
         }
     });
@@ -233,6 +257,8 @@ enum Found {
     Unsized(CleanTarget),
     /// The entry is a gitignore match.
     Ignored(PathBuf),
+    /// The walk could not read an entry.
+    Skipped(ignore::Error),
 }
 
 /// Walk `root` on several threads and send each match through `tx`.
@@ -260,10 +286,14 @@ fn walk_parallel(
         .build_parallel()
         .run(|| {
             let tx = tx.clone();
-            let mut ctx = Context::default();
+            let mut ctx = Context::new(root);
             Box::new(move |entry| {
-                let Ok(entry) = entry else {
-                    return WalkState::Continue;
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        let _ = tx.send(Found::Skipped(error));
+                        return WalkState::Continue;
+                    }
                 };
                 let (state, found) =
                     judge(&entry, adapters, ignored, filters, root_device, &mut ctx);
@@ -339,6 +369,7 @@ fn judge(
     if let Some((adapter, description)) = matched {
         let mut target = CleanTarget {
             tracked: false,
+            kind: EntryKind::of(file_type),
             path: path.to_path_buf(),
             adapter,
             description,
@@ -347,7 +378,7 @@ fn judge(
         if file_type.is_dir() {
             (skip, Some(Found::Unsized(target)))
         } else {
-            target.size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            target.size = entry.metadata().map(|m| file_size(&m)).unwrap_or(0);
             // A file holds no repository.
             (skip, Some(Found::Adapter(target, DirStats::default())))
         }
@@ -466,14 +497,17 @@ impl Emitter<'_> {
     }
 }
 
-/// Run the gitignore adapter, reporting a failure as a warning.
-/// Excluded paths are not walked.
-fn scan_gitignore(root: &Path, filters: &Filters) -> Vec<CleanTarget> {
+/// Run the gitignore adapter. A failure, such as an unreadable
+/// `.gitignore`, is recorded in `skipped`. Excluded paths are not walked.
+fn scan_gitignore(root: &Path, filters: &Filters, skipped: &mut SkippedPaths) -> Vec<CleanTarget> {
     let excluded = |path: &Path, is_dir| filters.prune(path, is_dir);
     GitignoreAdapter
-        .scan_except(root, &excluded, filters.limits)
+        .scan_except(root, &excluded, filters.limits, skipped)
         .unwrap_or_else(|e| {
-            eprintln!("Warning: adapter '{}' failed: {e}", GitignoreAdapter::NAME);
+            skipped.add(
+                root.to_path_buf(),
+                format!("adapter '{}' failed: {e:#}", GitignoreAdapter::NAME),
+            );
             Vec::new()
         })
 }
@@ -500,7 +534,9 @@ mod tests {
         fs::create_dir(dir.path().join(".venv")).unwrap();
         fs::write(dir.path().join("module.pyc"), b"\x00").unwrap();
 
-        let results = scan_enabled(&[dir.path().to_path_buf()], &enabled_cli()).unwrap();
+        let results = scan_enabled(&[dir.path().to_path_buf()], &enabled_cli())
+            .unwrap()
+            .targets;
         let adapters: Vec<_> = results.iter().map(|t| t.adapter).collect();
 
         assert!(adapters.contains(&"node"));
@@ -530,7 +566,9 @@ mod tests {
         fs::write(dir.path().join("build.gradle"), "plugins {}").unwrap();
         fs::create_dir(dir.path().join("build")).unwrap();
 
-        let results = scan_enabled(&[dir.path().to_path_buf()], &enabled_cli()).unwrap();
+        let results = scan_enabled(&[dir.path().to_path_buf()], &enabled_cli())
+            .unwrap()
+            .targets;
         let target = results
             .iter()
             .find(|t| t.path == dir.path().join("target"))
@@ -561,7 +599,9 @@ mod tests {
 
         let mut cli = enabled_cli();
         cli.adapters.enabled.remove("node");
-        let results = scan_enabled(&[dir.path().to_path_buf()], &cli).unwrap();
+        let results = scan_enabled(&[dir.path().to_path_buf()], &cli)
+            .unwrap()
+            .targets;
         assert!(results.is_empty());
     }
 
@@ -578,7 +618,9 @@ mod tests {
 
         let mut cli = enabled_cli();
         cli.no_size = true;
-        let results = scan_enabled(&[dir.path().to_path_buf()], &cli).unwrap();
+        let results = scan_enabled(&[dir.path().to_path_buf()], &cli)
+            .unwrap()
+            .targets;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].path, dir.path().join("node_modules"));
         assert_eq!(results[0].size, 0);

@@ -135,9 +135,13 @@ fn auto_mode_reports_a_breakdown_by_adapter() {
     let dir = TempDir::new().unwrap();
     let root = dir.path();
     common::make_file(&root.join("web").join("package.json"), b"{}");
-    common::make_file(&root.join("web").join("node_modules").join("a.js"), b"123");
+    // Whole file system blocks, so that the sizes are exact.
+    common::make_file(
+        &root.join("web").join("node_modules").join("a.js"),
+        &[b'x'; 4096],
+    );
     common::make_file(&root.join("api").join("Cargo.toml"), b"[package]");
-    common::make_file(&root.join("api").join("target").join("app"), b"1234567");
+    common::make_file(&root.join("api").join("target").join("app"), &[b'x'; 8192]);
 
     let output = common::vacuum()
         .arg(root)
@@ -147,6 +151,6 @@ fn auto_mode_reports_a_breakdown_by_adapter() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("cargo  1 item   7 B"), "{stdout}");
-    assert!(stdout.contains("node   1 item   3 B"), "{stdout}");
+    assert!(stdout.contains("cargo  1 item   8.2 kB"), "{stdout}");
+    assert!(stdout.contains("node   1 item   4.1 kB"), "{stdout}");
 }

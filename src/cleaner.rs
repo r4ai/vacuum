@@ -1,9 +1,8 @@
 use anyhow::Context as _;
-use bytesize::ByteSize;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::fs;
 
-use crate::adapter::CleanTarget;
+use crate::adapter::{CleanTarget, EntryKind};
 
 // ─── Removal ──────────────────────────────────────────────────────────────────
 
@@ -28,12 +27,27 @@ impl DeleteMethod {
 }
 
 /// Remove one target with `method`.
+///
+/// Time passes between the scan and the removal, above all in safe mode.
+/// A target whose type changed since the scan, such as a directory
+/// replaced by a symlink, is not removed.
 fn remove(target: &CleanTarget, method: DeleteMethod) -> anyhow::Result<()> {
     let path = &target.path;
+    let Some(kind) = EntryKind::at(path) else {
+        anyhow::bail!("No longer exists: {}", path.display());
+    };
+    if kind != target.kind {
+        anyhow::bail!(
+            "Skipped, changed since the scan (was {:?}, now {kind:?}): {}",
+            target.kind,
+            path.display()
+        );
+    }
     match method {
         DeleteMethod::Trash => trash::delete(path)
             .with_context(|| format!("Failed to move to trash: {}", path.display())),
-        DeleteMethod::Remove if path.is_dir() => fs::remove_dir_all(path)
+        // `kind` does not follow symlinks, so a symlink is removed as a file.
+        DeleteMethod::Remove if kind == EntryKind::Dir => fs::remove_dir_all(path)
             .with_context(|| format!("Failed to remove directory: {}", path.display())),
         DeleteMethod::Remove => fs::remove_file(path)
             .with_context(|| format!("Failed to remove file: {}", path.display())),
@@ -122,25 +136,15 @@ pub fn remove_all(
 }
 
 /// Delete the given targets, showing a progress bar.
-/// In dry-run mode, only prints what would be deleted.
+/// In dry-run mode, deletes and prints nothing.
 pub fn delete_targets(
     targets: &[CleanTarget],
     dry_run: bool,
     method: DeleteMethod,
     quiet: bool,
 ) -> DeleteReport {
+    // The caller lists the targets, so a dry run has nothing to add.
     if dry_run {
-        if !quiet && !targets.is_empty() {
-            println!("Dry run — the following would be deleted:");
-            for t in targets {
-                println!(
-                    "  {}  ({})",
-                    t.path.display(),
-                    ByteSize(t.size).display().si()
-                );
-            }
-            println!();
-        }
         return DeleteReport::default();
     }
 
@@ -185,6 +189,7 @@ mod tests {
             adapter: "test",
             description: "test".into(),
             size: 0,
+            kind: EntryKind::File,
         };
         let report = delete_targets(&[missing], false, DeleteMethod::Remove, true);
         assert_eq!(report.errors.len(), 1);
@@ -201,11 +206,81 @@ mod tests {
             adapter: "test",
             description: "test".into(),
             size: 1,
+            kind: EntryKind::File,
         };
         let report = delete_targets(&[target], false, DeleteMethod::Remove, true);
         assert!(report.errors.is_empty());
         assert_eq!(report.freed, 1);
         assert!(!path.exists());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod verify_tests {
+    use super::*;
+    use crate::adapter::EntryKind;
+    use std::os::unix::fs::symlink;
+    use tempfile::TempDir;
+
+    fn dir_target(path: std::path::PathBuf) -> CleanTarget {
+        CleanTarget {
+            tracked: false,
+            path,
+            adapter: "test",
+            description: "test".into(),
+            size: 0,
+            kind: EntryKind::Dir,
+        }
+    }
+
+    #[test]
+    fn a_directory_replaced_by_a_symlink_is_not_removed() {
+        let dir = TempDir::new().unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        fs::create_dir(&elsewhere).unwrap();
+        fs::write(elsewhere.join("precious"), b"x").unwrap();
+        let target = dir.path().join("node_modules");
+        symlink(&elsewhere, &target).unwrap();
+
+        for method in [DeleteMethod::Remove, DeleteMethod::Trash] {
+            let report = remove_all(&[dir_target(target.clone())], method, |_| {});
+            assert_eq!(report.errors.len(), 1, "{method:?}");
+            assert!(report.errors[0].1.contains("changed since the scan"));
+        }
+        assert!(target.is_symlink());
+        assert!(elsewhere.join("precious").exists());
+    }
+
+    #[test]
+    fn a_directory_replaced_by_a_file_is_not_removed() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("build");
+        fs::write(&target, b"x").unwrap();
+
+        let report = remove_all(&[dir_target(target.clone())], DeleteMethod::Remove, |_| {});
+
+        assert_eq!(report.errors.len(), 1);
+        assert!(target.exists());
+    }
+
+    #[test]
+    fn a_scanned_symlink_is_removed_without_following_it() {
+        let dir = TempDir::new().unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        fs::create_dir(&elsewhere).unwrap();
+        fs::write(elsewhere.join("precious"), b"x").unwrap();
+        let link = dir.path().join("link");
+        symlink(&elsewhere, &link).unwrap();
+        let target = CleanTarget {
+            kind: EntryKind::Symlink,
+            ..dir_target(link.clone())
+        };
+
+        let report = remove_all(&[target], DeleteMethod::Remove, |_| {});
+
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert!(!link.exists() && !link.is_symlink());
+        assert!(elsewhere.join("precious").exists());
     }
 }
 
