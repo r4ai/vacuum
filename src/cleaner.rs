@@ -1,5 +1,4 @@
 use anyhow::Context as _;
-use bytesize::ByteSize;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::fs;
 
@@ -122,25 +121,15 @@ pub fn remove_all(
 }
 
 /// Delete the given targets, showing a progress bar.
-/// In dry-run mode, only prints what would be deleted.
+/// In dry-run mode, deletes and prints nothing.
 pub fn delete_targets(
     targets: &[CleanTarget],
     dry_run: bool,
     method: DeleteMethod,
     quiet: bool,
 ) -> DeleteReport {
+    // The caller lists the targets, so a dry run has nothing to add.
     if dry_run {
-        if !quiet && !targets.is_empty() {
-            println!("Dry run — the following would be deleted:");
-            for t in targets {
-                println!(
-                    "  {}  ({})",
-                    t.path.display(),
-                    ByteSize(t.size).display().si()
-                );
-            }
-            println!();
-        }
         return DeleteReport::default();
     }
 
