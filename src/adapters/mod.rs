@@ -201,6 +201,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         kind: Kind::Entry(&simple::TERRAFORM),
     },
     AdapterSpec {
+        name: "elm",
+        label: "Elm",
+        targets: "elm-stuff/",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::ELM),
+    },
+    AdapterSpec {
         name: GitignoreAdapter::NAME,
         label: "Gitignore",
         targets: ".gitignore-matched paths",
