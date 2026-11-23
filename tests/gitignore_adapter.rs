@@ -225,3 +225,40 @@ fn gitignore_adapter_keeps_whitelisted_file_in_nested_ignored_dir() {
     assert!(!root.join("build").join("sub").join("out.o").exists());
     assert!(!root.join("build").join("other").exists());
 }
+
+/// Git reads `.gitignore` in every directory and `.git/info/exclude`,
+/// so vacuum does too.
+#[test]
+fn nested_gitignore_and_info_exclude_are_honored() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    common::git(root, &["init", "-q"]);
+    common::make_file(
+        &root.join(".git").join("info").join("exclude"),
+        b"scratch.txt\n",
+    );
+    common::make_file(&root.join("scratch.txt"), b"x");
+    common::make_file(&root.join("web").join(".gitignore"), b"*.cache\n");
+    common::make_file(&root.join("web").join("a.cache"), b"x");
+    common::make_file(&root.join("b.cache"), b"keep");
+
+    let status = common::vacuum()
+        .arg(root)
+        .args(GITIGNORE_ONLY)
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert!(
+        !root.join("scratch.txt").exists(),
+        "excluded by info/exclude"
+    );
+    assert!(
+        !root.join("web").join("a.cache").exists(),
+        "ignored by web/.gitignore"
+    );
+    assert!(
+        root.join("b.cache").exists(),
+        "web/.gitignore does not apply here"
+    );
+}

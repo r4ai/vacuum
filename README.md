@@ -200,7 +200,7 @@ gitignore = false
 | `--scala` | `target/`, `project/target/` | on |
 | `--terraform` | `.terraform/`（中に `terraform.tfstate` があれば残す） | on |
 | `--elm` | `elm-stuff/` | on |
-| `--gitignore` | `.gitignore` にマッチするファイルすべて        | **off**（危険） |
+| `--gitignore` | 各ディレクトリの `.gitignore` と `.git/info/exclude` にマッチするファイルすべて | **off**（危険） |
 
 コンテキストファイル（`package.json`, `Cargo.toml` 等）が存在するディレクトリのみを対象とする。誤検知を防ぐためのガードとして機能する。
 
