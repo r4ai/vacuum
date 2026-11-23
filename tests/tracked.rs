@@ -19,6 +19,11 @@ fn setup(root: &Path) {
     common::make_file(&root.join("web").join("node_modules").join("a.js"), b"");
 }
 
+/// A relative path as vacuum prints it, with the platform's separator.
+fn shown(dir: &str, name: &str) -> String {
+    Path::new(dir).join(name).display().to_string()
+}
+
 fn vacuum(root: &Path, args: &[&str]) -> std::process::Output {
     let output = common::vacuum()
         .arg(root)
@@ -60,12 +65,12 @@ fn include_tracked_lists_and_marks_tracked_targets() {
 
     let vendor_line = stdout
         .lines()
-        .find(|l| l.contains("app/vendor"))
+        .find(|l| l.contains(&*shown("app", "vendor")))
         .unwrap_or_else(|| panic!("vendor not listed: {stdout}"));
     assert!(vendor_line.contains("[tracked]"), "{vendor_line}");
     let node_line = stdout
         .lines()
-        .find(|l| l.contains("web/node_modules"))
+        .find(|l| l.contains(&*shown("web", "node_modules")))
         .unwrap_or_else(|| panic!("node_modules not listed: {stdout}"));
     assert!(!node_line.contains("[tracked]"), "{node_line}");
 }

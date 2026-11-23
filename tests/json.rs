@@ -38,7 +38,7 @@ fn json_lists_targets_without_deleting_on_dry_run() {
     assert_eq!(
         targets[0]["path"],
         // vacuum prints canonical paths (e.g. /private/var on macOS).
-        root.canonicalize()
+        dunce::canonicalize(root)
             .unwrap()
             .join("node_modules")
             .display()
