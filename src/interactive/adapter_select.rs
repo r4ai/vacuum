@@ -89,7 +89,14 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
     .block(block);
     frame.render_widget(header, chunks[0]);
 
-    // Adapter list
+    // Adapter list. Names are padded to one column, one space past the
+    // longest.
+    let name_width = REGISTRY
+        .iter()
+        .map(|spec| spec.name.len())
+        .max()
+        .unwrap_or(0)
+        + 1;
     let items: Vec<ListItem> = REGISTRY
         .iter()
         .enumerate()
@@ -114,7 +121,7 @@ pub fn render_adapter_selection(frame: &mut ratatui::Frame, state: &mut AdapterS
                 Span::styled(check, check_style),
                 Span::raw(" "),
                 Span::styled(
-                    format!("{:<10}", spec.name),
+                    format!("{:<name_width$}", spec.name),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(spec.targets, Style::default().fg(Color::Gray)),
@@ -256,6 +263,19 @@ mod tests {
             "gitignore should be on"
         );
         assert!(is_checked(row_of(&rows, "cargo")), "cargo should be on");
+    }
+
+    #[test]
+    fn long_names_are_separated_from_targets() {
+        let rows = rendered_rows(scan_config(true, false));
+        for spec in REGISTRY {
+            let row = row_of(&rows, spec.name);
+            assert!(
+                row.contains(&format!("{} ", spec.name)),
+                "{}: name runs into its targets in {row:?}",
+                spec.name
+            );
+        }
     }
 
     #[test]
