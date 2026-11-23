@@ -191,6 +191,17 @@ pub static DART: SimpleAdapter = SimpleAdapter {
     }],
 };
 
+/// Composer dependencies.
+pub static PHP: SimpleAdapter = SimpleAdapter {
+    name: "php",
+    label: "Composer dependencies",
+    rules: &[Rule {
+        dirs: &["vendor"],
+        context: &["composer.json"],
+        unless_inside: &[],
+    }],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;

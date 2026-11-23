@@ -169,6 +169,14 @@ pub static REGISTRY: &[AdapterSpec] = &[
         kind: Kind::Entry(&simple::DART),
     },
     AdapterSpec {
+        name: "php",
+        label: "PHP Composer",
+        targets: "vendor/ next to a composer.json",
+        default_enabled: true,
+        is_safe: true,
+        kind: Kind::Entry(&simple::PHP),
+    },
+    AdapterSpec {
         name: GitignoreAdapter::NAME,
         label: "Gitignore",
         targets: ".gitignore-matched paths",
