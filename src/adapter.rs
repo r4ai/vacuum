@@ -22,11 +22,28 @@ pub struct CleanTarget {
 /// Many candidates share a parent directory, so each lookup is done once.
 #[derive(Default)]
 pub struct Context {
+    /// The scan root. Lookups that climb the tree stop here.
+    root: PathBuf,
     files: HashMap<PathBuf, HashMap<&'static str, bool>>,
     extensions: HashMap<PathBuf, HashMap<&'static str, bool>>,
 }
 
 impl Context {
+    /// A context for a scan of `root`.
+    pub fn new(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            ..Self::default()
+        }
+    }
+
+    /// `dir` and its ancestors up to the scan root, nearest first.
+    /// Directories outside the scan root are not part of the scan.
+    pub fn ancestors<'p>(&self, dir: &'p Path) -> impl Iterator<Item = &'p Path> {
+        let root = self.root.clone();
+        dir.ancestors().take_while(move |p| p.starts_with(&root))
+    }
+
     /// Whether `dir` contains an entry named `name`.
     pub fn has_file(&mut self, dir: &Path, name: &'static str) -> bool {
         Self::cached(&mut self.files, dir, name, || dir.join(name).exists())
@@ -226,6 +243,20 @@ mod tests {
         let mut ctx = Context::default();
         assert!(ctx.has_file(dir.path(), "Cargo.toml"));
         assert!(!ctx.has_file(dir.path(), "package.json"));
+    }
+
+    #[test]
+    fn context_ancestors_stop_at_the_root() {
+        let ctx = Context::new(Path::new("/a/b"));
+        let ancestors: Vec<_> = ctx.ancestors(Path::new("/a/b/c/d")).collect();
+        assert_eq!(
+            ancestors,
+            [
+                Path::new("/a/b/c/d"),
+                Path::new("/a/b/c"),
+                Path::new("/a/b")
+            ]
+        );
     }
 
     #[test]

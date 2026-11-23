@@ -260,7 +260,7 @@ fn walk_parallel(
         .build_parallel()
         .run(|| {
             let tx = tx.clone();
-            let mut ctx = Context::default();
+            let mut ctx = Context::new(root);
             Box::new(move |entry| {
                 let Ok(entry) = entry else {
                     return WalkState::Continue;
