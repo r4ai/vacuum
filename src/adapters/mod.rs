@@ -1,6 +1,7 @@
 //! Every adapter is defined once, in [`REGISTRY`]. CLI flags, the scan
 //! configuration and the TUI adapter list are all generated from it.
 
+pub mod agents;
 pub mod cargo;
 pub mod gitignore;
 pub mod go;
@@ -207,6 +208,46 @@ pub static REGISTRY: &[AdapterSpec] = &[
         default_enabled: true,
         is_safe: true,
         kind: Kind::Entry(&simple::ELM),
+    },
+    AdapterSpec {
+        name: "claude-code",
+        label: "Claude Code",
+        targets: "debug/, shell-snapshots/, file-history/, caches in ~/.claude",
+        default_enabled: false,
+        is_safe: false,
+        kind: Kind::Entry(&agents::CLAUDE_CODE),
+    },
+    AdapterSpec {
+        name: "codex",
+        label: "OpenAI Codex",
+        targets: "sessions/, archived_sessions/, log/, shell_snapshots/ in ~/.codex",
+        default_enabled: false,
+        is_safe: false,
+        kind: Kind::Entry(&agents::CODEX),
+    },
+    AdapterSpec {
+        name: "antigravity",
+        label: "Google Antigravity",
+        targets: "browser_recordings/, brain/, conversations/ etc. in ~/.gemini/antigravity",
+        default_enabled: false,
+        is_safe: false,
+        kind: Kind::Entry(&agents::ANTIGRAVITY),
+    },
+    AdapterSpec {
+        name: "gemini-cli",
+        label: "Gemini CLI",
+        targets: "tmp/ in ~/.gemini",
+        default_enabled: false,
+        is_safe: false,
+        kind: Kind::Entry(&agents::GEMINI_CLI),
+    },
+    AdapterSpec {
+        name: "aider",
+        label: "Aider",
+        targets: ".aider.chat.history.md, .aider.input.history, .aider.tags.cache.v*/",
+        default_enabled: false,
+        is_safe: false,
+        kind: Kind::Entry(&agents::AiderAdapter),
     },
     AdapterSpec {
         name: GitignoreAdapter::NAME,

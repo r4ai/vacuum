@@ -180,11 +180,11 @@ mod tests {
 
     #[test]
     fn safe_adapters_are_enabled_by_default() {
-        // Every adapter but the dangerous gitignore one.
+        // Dangerous ones, such as gitignore and the agent adapters, are off.
         let mut expected: Vec<_> = REGISTRY
             .iter()
+            .filter(|spec| spec.is_safe)
             .map(|spec| spec.name)
-            .filter(|name| *name != "gitignore")
             .collect();
         expected.sort();
         assert_eq!(enabled(&[]), expected);

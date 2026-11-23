@@ -193,9 +193,43 @@ gitignore = false
 | `--scala` | `target/`, `project/target/` | on |
 | `--terraform` | `.terraform/`（中に `terraform.tfstate` があれば残す） | on |
 | `--elm` | `elm-stuff/` | on |
+| `--claude-code` | `~/.claude` の `debug/`, `shell-snapshots/`, `file-history/` 等 | **off** |
+| `--codex` | `~/.codex` の `sessions/`, `archived_sessions/`, `log/`, `shell_snapshots/` | **off** |
+| `--antigravity` | `~/.gemini/antigravity` の `browser_recordings/`, `brain/`, `conversations/` 等 | **off** |
+| `--gemini-cli` | `~/.gemini/tmp/` | **off** |
+| `--aider` | `.aider.chat.history.md`, `.aider.input.history`, `.aider.tags.cache.v*/` 等 | **off** |
 | `--gitignore` | `.gitignore` にマッチするファイルすべて        | **off**（危険） |
 
 コンテキストファイル（`package.json`, `Cargo.toml` 等）が存在するディレクトリのみを対象とする。誤検知を防ぐためのガードとして機能する。
+
+### AI エージェントのデータ
+
+AI コーディングエージェントが残すログ、キャッシュ、会話履歴を削除する。
+会話履歴を消すと、そのセッションは再開できない。そのため、どれも既定で無効にしている。
+使うときはフラグで有効にし、safe モードで消すものを選ぶ。
+
+```sh
+# ホームディレクトリにある Claude Code と Codex のデータを選んで消す
+vacuum ~/.claude ~/.codex --claude-code --codex
+
+# Antigravity のブラウザ録画などを一覧するだけにする
+vacuum ~/.gemini --antigravity --gemini-cli --mode list
+```
+
+| アダプター | 場所 | 削除対象 | 残すもの |
+| --- | --- | --- | --- |
+| `claude-code` | `~/.claude` | `debug/`（デバッグログ）、`shell-snapshots/`、`file-history/`（rewind 用のチェックポイント）、`paste-cache/`、`image-cache/`、`session-env/`、旧版の `todos/`, `statsig/`, `logs/` | `projects/`（会話履歴と auto memory）、`history.jsonl`、設定 |
+| `codex` | `~/.codex` | `sessions/`、`archived_sessions/`（会話履歴）、`log/`、`shell_snapshots/` | `worktrees/`、`history.jsonl`、設定と認証情報 |
+| `antigravity` | `~/.gemini/antigravity`, `~/.gemini/antigravity-cli` | `browser_recordings/`（スクリーンショットと録画）、`brain/`（会話ごとの成果物とログ）、`conversations/`、`implicit/`、`code_tracker/` | 設定 |
+| `gemini-cli` | `~/.gemini` | `tmp/`（会話、チェックポイント、ログ） | 設定、`GEMINI.md` |
+| `aider` | プロジェクト内 | `.aider.chat.history.md`、`.aider.input.history`、`.aider.llm.history`、`.aider.tags.cache.v*/` | `.aider.conf.yml` |
+
+- 誤検知を防ぐため、ディレクトリ名でホームを見分ける。`claude-code` と `codex` は、`projects/` や `auth.json` などがあるときだけホームとみなす。リポジトリ内の `.claude/` や `.codex/` は設定なので削除しない。
+- Claude Code の `projects/` は残す。auto memory を含み、Claude Code 自身が古いものを消す（`cleanupPeriodDays`）ため。
+- Codex と Claude Code の worktree は残す。コミットしていない変更を含むことがあるため。worktree 内の `node_modules/` などは、通常のアダプターで削除できる。
+- `CLAUDE_CONFIG_DIR` や `CODEX_HOME` でホームを移した場合は、ディレクトリ名が変わるため検出しない。
+- `--older-than` は候補の親（ホーム）の更新日時で判定する。ホームはエージェントを使うたびに更新されるため、これらの候補はほぼ除外される。
+- エージェントの実行中は削除しない。
 
 ### git 管理下の候補
 
