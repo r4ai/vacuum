@@ -15,6 +15,40 @@ pub struct CleanTarget {
     pub size: u64,
     /// Whether the target is, or contains, a file tracked by git.
     pub tracked: bool,
+    /// What the entry was when it was scanned.
+    pub kind: EntryKind,
+}
+
+/// The type of a filesystem entry, without following symlinks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EntryKind {
+    #[default]
+    Dir,
+    File,
+    Symlink,
+    /// Anything else, such as a socket or a device.
+    Other,
+}
+
+impl EntryKind {
+    pub fn of(file_type: std::fs::FileType) -> Self {
+        if file_type.is_symlink() {
+            Self::Symlink
+        } else if file_type.is_dir() {
+            Self::Dir
+        } else if file_type.is_file() {
+            Self::File
+        } else {
+            Self::Other
+        }
+    }
+
+    /// The type of the entry at `path` now, or `None` if it is gone.
+    pub fn at(path: &std::path::Path) -> Option<Self> {
+        std::fs::symlink_metadata(path)
+            .ok()
+            .map(|m| Self::of(m.file_type()))
+    }
 }
 
 /// Cached filesystem lookups shared by all adapters during one scan.

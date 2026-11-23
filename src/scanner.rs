@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::adapter::{Adapter, CleanTarget, Context, DirStats, WalkLimits, device_of, dir_stats};
+use crate::adapter::{
+    Adapter, CleanTarget, Context, DirStats, EntryKind, WalkLimits, device_of, dir_stats,
+};
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::age::AgeIndex;
 use crate::cli::{Cli, Mode};
@@ -339,6 +341,7 @@ fn judge(
     if let Some((adapter, description)) = matched {
         let mut target = CleanTarget {
             tracked: false,
+            kind: EntryKind::of(file_type),
             path: path.to_path_buf(),
             adapter,
             description,

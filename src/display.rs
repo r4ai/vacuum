@@ -191,6 +191,7 @@ mod tests {
             description: String::new(),
             size,
             tracked: false,
+            kind: Default::default(),
         }
     }
 

@@ -2,7 +2,7 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::path::Path;
 use walkdir::WalkDir;
 
-use crate::adapter::{CleanTarget, WalkLimits, compute_dir_size, device_of};
+use crate::adapter::{CleanTarget, EntryKind, WalkLimits, compute_dir_size, device_of};
 
 pub struct GitignoreAdapter;
 
@@ -157,6 +157,7 @@ impl GitignoreAdapter {
                 };
                 targets.push(CleanTarget {
                     tracked: false,
+                    kind: EntryKind::of(entry.file_type()),
                     path: path.to_path_buf(),
                     adapter: Self::NAME,
                     description: format!("gitignore match: {}", relative.display()),
