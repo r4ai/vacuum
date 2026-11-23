@@ -17,10 +17,11 @@ fn has_python_context(ctx: &mut Context, dir: &Path) -> bool {
 }
 
 /// Whether Python bytecode (`__pycache__/`, `*.pyc`) in `dir` belongs to a
-/// Python project: `dir` or one of its 3 nearest ancestors has a context
-/// file, or `dir` holds a `.py` file.
+/// Python project: `dir` or one of its 3 nearest ancestors inside the scan
+/// root has a context file, or `dir` holds a `.py` file.
 fn has_bytecode_context(ctx: &mut Context, dir: &Path) -> bool {
-    dir.ancestors().take(4).any(|p| has_python_context(ctx, p)) || ctx.has_extension(dir, "py")
+    let ancestors: Vec<&Path> = ctx.ancestors(dir).take(4).collect();
+    ancestors.into_iter().any(|p| has_python_context(ctx, p)) || ctx.has_extension(dir, "py")
 }
 
 impl Adapter for PythonAdapter {
@@ -77,6 +78,17 @@ mod tests {
 
         let targets = scan_with(PythonAdapter, dir.path());
         assert!(targets.iter().any(|t| t.path == subdir.join("__pycache__")));
+    }
+
+    #[test]
+    fn context_outside_the_scan_root_is_ignored() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("pyproject.toml"), "").unwrap();
+        let root = dir.path().join("data");
+        fs::create_dir_all(root.join("__pycache__")).unwrap();
+        fs::write(root.join("cached.pyc"), "").unwrap();
+
+        assert!(scan_with(PythonAdapter, &root).is_empty());
     }
 
     #[test]
