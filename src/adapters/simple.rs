@@ -179,6 +179,18 @@ pub static ZIG: SimpleAdapter = SimpleAdapter {
         unless_inside: &[],
     }],
 };
+
+/// Dart and Flutter tool state and build output.
+pub static DART: SimpleAdapter = SimpleAdapter {
+    name: "dart",
+    label: "Dart build artifact",
+    rules: &[Rule {
+        dirs: &[".dart_tool", "build"],
+        context: &["pubspec.yaml"],
+        unless_inside: &[],
+    }],
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
