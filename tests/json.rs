@@ -18,9 +18,14 @@ fn json(args: &[&str], root: &std::path::Path) -> serde_json::Value {
         .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&output.stdout)))
 }
 
+/// Size of the one file in [`node_project`]. A whole file system block
+/// occupies exactly its length, so the reported size is exact.
+const SIZE: u64 = 4096;
+
 fn node_project(root: &std::path::Path) {
     common::make_file(&root.join("package.json"), b"{}");
-    common::make_file(&root.join("node_modules").join("a.js"), b"12345");
+    let data: Vec<u8> = (0..SIZE).map(|i| (i % 251) as u8).collect();
+    common::make_file(&root.join("node_modules").join("a.js"), &data);
 }
 
 #[test]
@@ -34,7 +39,7 @@ fn json_lists_targets_without_deleting_on_dry_run() {
     let targets = value["targets"].as_array().unwrap();
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0]["adapter"], "node");
-    assert_eq!(targets[0]["size"], 5);
+    assert_eq!(targets[0]["size"], SIZE);
     assert_eq!(
         targets[0]["path"],
         // vacuum prints canonical paths (e.g. /private/var on macOS).
@@ -44,7 +49,7 @@ fn json_lists_targets_without_deleting_on_dry_run() {
             .display()
             .to_string()
     );
-    assert_eq!(value["total_size"], 5);
+    assert_eq!(value["total_size"], SIZE);
     assert_eq!(value["result"]["dry_run"], true);
     assert_eq!(value["result"]["freed"], 0);
     assert!(root.join("node_modules").exists());
@@ -59,7 +64,7 @@ fn json_reports_deletion_result() {
     let value = json(&[], root);
 
     assert_eq!(value["result"]["dry_run"], false);
-    assert_eq!(value["result"]["freed"], 5);
+    assert_eq!(value["result"]["freed"], SIZE);
     assert_eq!(value["result"]["errors"].as_array().unwrap().len(), 0);
     assert!(!root.join("node_modules").exists());
 }
@@ -104,5 +109,5 @@ fn json_reports_trashed_bytes_apart_from_freed_bytes() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["result"]["method"], "trash");
     assert_eq!(value["result"]["freed"], 0);
-    assert_eq!(value["result"]["trashed"], 5);
+    assert_eq!(value["result"]["trashed"], SIZE);
 }

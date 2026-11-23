@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::adapter::{
-    Adapter, CleanTarget, Context, DirStats, EntryKind, WalkLimits, device_of, dir_stats,
+    Adapter, CleanTarget, Context, DirStats, EntryKind, WalkLimits, device_of, dir_stats, file_size,
 };
 use crate::adapters::{GitignoreAdapter, Kind, REGISTRY};
 use crate::age::AgeIndex;
@@ -350,7 +350,7 @@ fn judge(
         if file_type.is_dir() {
             (skip, Some(Found::Unsized(target)))
         } else {
-            target.size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            target.size = entry.metadata().map(|m| file_size(&m)).unwrap_or(0);
             // A file holds no repository.
             (skip, Some(Found::Adapter(target, DirStats::default())))
         }

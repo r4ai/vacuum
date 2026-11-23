@@ -2,7 +2,7 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use std::path::Path;
 use walkdir::WalkDir;
 
-use crate::adapter::{CleanTarget, EntryKind, WalkLimits, compute_dir_size, device_of};
+use crate::adapter::{CleanTarget, EntryKind, WalkLimits, compute_dir_size, device_of, file_size};
 
 pub struct GitignoreAdapter;
 
@@ -153,7 +153,7 @@ impl GitignoreAdapter {
                 let size = if is_dir {
                     compute_dir_size(path)
                 } else {
-                    entry.metadata().map(|m| m.len()).unwrap_or(0)
+                    entry.metadata().map(|m| file_size(&m)).unwrap_or(0)
                 };
                 targets.push(CleanTarget {
                     tracked: false,
