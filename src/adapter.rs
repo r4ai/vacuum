@@ -151,8 +151,9 @@ impl WalkLimits {
     }
 }
 
-/// Compute the total byte count for a directory tree, best-effort.
-/// Symlinks are not followed; errors on individual entries are skipped.
+/// Compute the bytes that removing a directory tree frees, best-effort.
+/// See [`DirStats::size`]. Symlinks are not followed; errors on
+/// individual entries are skipped.
 /// Sub-directories are measured in parallel on the rayon thread pool.
 pub fn compute_dir_size(path: &Path) -> u64 {
     dir_stats(path, true, false).size
@@ -161,13 +162,30 @@ pub fn compute_dir_size(path: &Path) -> u64 {
 /// What one walk of a directory tree learns.
 #[derive(Debug, Default)]
 pub struct DirStats {
-    /// Total byte count of regular files; 0 unless requested.
+    /// Bytes that removing the tree frees; 0 unless requested. Counts
+    /// the blocks a file occupies, not its length. Counts a hard-linked
+    /// file once, and only if all its links are in the tree.
     pub size: u64,
     /// Every directory at or below the root that holds a `.git` entry.
     pub repos: Vec<PathBuf>,
     /// Whether the tree holds a directory on another file system. Only
     /// detected when the walk stays on one file system.
     pub crosses_mount: bool,
+    /// Hard-linked files seen so far, until [`DirStats::settle_links`].
+    links: HashMap<FileId, Linked>,
+}
+
+/// Identifies a file across its hard links: `(device, inode)`.
+type FileId = (u64, u64);
+
+/// A file with several hard links.
+#[derive(Debug, Clone, Copy)]
+struct Linked {
+    /// How many links the file has.
+    nlink: u64,
+    /// How many of them the walk found.
+    seen: u64,
+    usage: u64,
 }
 
 impl DirStats {
@@ -175,7 +193,59 @@ impl DirStats {
         self.size += other.size;
         self.repos.extend(other.repos);
         self.crosses_mount |= other.crosses_mount;
+        for (id, linked) in other.links {
+            self.links
+                .entry(id)
+                .and_modify(|l| l.seen += linked.seen)
+                .or_insert(linked);
+        }
         self
+    }
+
+    /// Add the hard-linked files whose links are all in the tree.
+    fn settle_links(mut self) -> Self {
+        self.size += self
+            .links
+            .drain()
+            .filter(|(_, l)| l.seen >= l.nlink)
+            .map(|(_, l)| l.usage)
+            .sum::<u64>();
+        self
+    }
+}
+
+/// Bytes the file occupies on disk. Unix counts allocated blocks, so a
+/// sparse file counts less than its length and a small file a whole block.
+#[cfg(unix)]
+pub fn disk_usage(meta: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    meta.blocks() * 512
+}
+
+#[cfg(not(unix))]
+pub fn disk_usage(meta: &std::fs::Metadata) -> u64 {
+    meta.len()
+}
+
+/// The hard-link identity of a file with more than one link.
+#[cfg(unix)]
+fn link_id(meta: &std::fs::Metadata) -> Option<(FileId, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    (meta.nlink() > 1).then(|| ((meta.dev(), meta.ino()), meta.nlink()))
+}
+
+#[cfg(not(unix))]
+fn link_id(_meta: &std::fs::Metadata) -> Option<(FileId, u64)> {
+    None
+}
+
+/// Bytes that removing a single file frees: none if another link keeps
+/// its data.
+pub fn file_size(meta: &std::fs::Metadata) -> u64 {
+    if link_id(meta).is_some() {
+        0
+    } else {
+        disk_usage(meta)
     }
 }
 
@@ -189,7 +259,7 @@ pub fn dir_stats(path: &Path, with_size: bool, one_file_system: bool) -> DirStat
     } else {
         None
     };
-    dir_stats_on(path, with_size, device)
+    dir_stats_on(path, with_size, device).settle_links()
 }
 
 /// The device a path lives on, where the platform tells. Symlinks are
@@ -211,6 +281,7 @@ fn dir_stats_on(path: &Path, with_size: bool, device: Option<u64>) -> DirStats {
     enum Item {
         Dir(PathBuf),
         File(u64),
+        Linked(FileId, Linked),
         ForeignMount,
     }
 
@@ -238,7 +309,19 @@ fn dir_stats_on(path: &Path, with_size: bool, device: Option<u64>) -> DirStats {
                     }
                 }
                 Ok(t) if t.is_file() && with_size => {
-                    Some(Item::File(entry.metadata().map(|m| m.len()).unwrap_or(0)))
+                    let meta = entry.metadata().ok()?;
+                    let usage = disk_usage(&meta);
+                    Some(match link_id(&meta) {
+                        Some((id, nlink)) => Item::Linked(
+                            id,
+                            Linked {
+                                nlink,
+                                seen: 1,
+                                usage,
+                            },
+                        ),
+                        None => Item::File(usage),
+                    })
                 }
                 _ => None,
             }
@@ -250,6 +333,10 @@ fn dir_stats_on(path: &Path, with_size: bool, device: Option<u64>) -> DirStats {
             Item::Dir(dir) => dir_stats_on(dir, with_size, device),
             Item::File(len) => DirStats {
                 size: *len,
+                ..DirStats::default()
+            },
+            Item::Linked(id, linked) => DirStats {
+                links: HashMap::from([(*id, *linked)]),
                 ..DirStats::default()
             },
             Item::ForeignMount => DirStats {
@@ -269,6 +356,15 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    /// A file system block. Files of whole blocks occupy their length on
+    /// common file systems, so the tests can expect exact sizes.
+    const BLOCK: usize = 4096;
+
+    /// `len` bytes that no file system compresses away.
+    fn data(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i * 31 % 251) as u8).collect()
+    }
 
     #[test]
     fn context_has_file() {
@@ -307,10 +403,10 @@ mod tests {
     fn compute_dir_size_does_not_follow_symlinks() {
         let dir = TempDir::new().unwrap();
         let outside = TempDir::new().unwrap();
-        fs::write(outside.path().join("big"), [0u8; 1000]).unwrap();
+        fs::write(outside.path().join("big"), data(4 * BLOCK)).unwrap();
         std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
-        fs::write(dir.path().join("a"), b"abc").unwrap();
-        assert_eq!(compute_dir_size(dir.path()), 3);
+        fs::write(dir.path().join("a"), data(BLOCK)).unwrap();
+        assert_eq!(compute_dir_size(dir.path()), BLOCK as u64);
     }
 
     #[test]
@@ -321,8 +417,9 @@ mod tests {
             let sub = dir.path().join(format!("d{i}")).join("x").join("y");
             fs::create_dir_all(&sub).unwrap();
             for j in 0..10 {
-                fs::write(sub.join(format!("f{j}")), vec![0u8; i + j]).unwrap();
-                expected += (i + j) as u64;
+                let len = (i + j + 1) * BLOCK;
+                fs::write(sub.join(format!("f{j}")), data(len)).unwrap();
+                expected += len as u64;
             }
         }
         assert_eq!(compute_dir_size(dir.path()), expected);
@@ -338,8 +435,8 @@ mod tests {
             deepest.push("d");
         }
         fs::create_dir_all(&deepest).unwrap();
-        fs::write(deepest.join("f"), [0u8; 1000]).unwrap();
-        assert_eq!(compute_dir_size(dir.path()), 1000);
+        fs::write(deepest.join("f"), data(BLOCK)).unwrap();
+        assert_eq!(compute_dir_size(dir.path()), BLOCK as u64);
     }
 
     #[test]
@@ -369,9 +466,9 @@ mod tests {
     fn dir_stats_on_one_file_system_sees_no_mount_in_a_plain_tree() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join("a").join("b")).unwrap();
-        fs::write(dir.path().join("a").join("b").join("f"), b"abcd").unwrap();
+        fs::write(dir.path().join("a").join("b").join("f"), data(BLOCK)).unwrap();
         let stats = dir_stats(dir.path(), true, true);
-        assert_eq!(stats.size, 4);
+        assert_eq!(stats.size, BLOCK as u64);
         assert!(!stats.crosses_mount);
     }
 
@@ -384,22 +481,49 @@ mod tests {
     #[test]
     fn compute_dir_size_single_file() {
         let dir = TempDir::new().unwrap();
-        let content = b"hello world";
-        fs::write(dir.path().join("file.txt"), content).unwrap();
-        assert_eq!(compute_dir_size(dir.path()), content.len() as u64);
+        fs::write(dir.path().join("file.txt"), data(BLOCK)).unwrap();
+        assert_eq!(compute_dir_size(dir.path()), BLOCK as u64);
     }
 
     #[test]
     fn compute_dir_size_sums_nested_files() {
         let dir = TempDir::new().unwrap();
-        let a = b"aaa";
-        let b_data = b"bb";
-        fs::write(dir.path().join("a.txt"), a).unwrap();
+        fs::write(dir.path().join("a.txt"), data(BLOCK)).unwrap();
         fs::create_dir(dir.path().join("sub")).unwrap();
-        fs::write(dir.path().join("sub").join("b.txt"), b_data).unwrap();
-        assert_eq!(
-            compute_dir_size(dir.path()),
-            (a.len() + b_data.len()) as u64
-        );
+        fs::write(dir.path().join("sub").join("b.txt"), data(2 * BLOCK)).unwrap();
+        assert_eq!(compute_dir_size(dir.path()), 3 * BLOCK as u64);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compute_dir_size_counts_a_hard_link_once() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("a"), data(2 * BLOCK)).unwrap();
+        fs::hard_link(dir.path().join("a"), dir.path().join("b")).unwrap();
+        assert_eq!(compute_dir_size(dir.path()), 2 * BLOCK as u64);
+    }
+
+    /// Removing a file whose other link is outside the tree frees nothing,
+    /// as with a pnpm store.
+    #[cfg(unix)]
+    #[test]
+    fn compute_dir_size_skips_files_linked_from_outside() {
+        let dir = TempDir::new().unwrap();
+        let tree = dir.path().join("node_modules");
+        fs::create_dir(&tree).unwrap();
+        fs::write(dir.path().join("store"), data(2 * BLOCK)).unwrap();
+        fs::hard_link(dir.path().join("store"), tree.join("a")).unwrap();
+        fs::write(tree.join("own"), data(BLOCK)).unwrap();
+        assert_eq!(compute_dir_size(&tree), BLOCK as u64);
+    }
+
+    /// A sparse file occupies less than its length.
+    #[cfg(unix)]
+    #[test]
+    fn compute_dir_size_counts_allocated_blocks() {
+        let dir = TempDir::new().unwrap();
+        let file = fs::File::create(dir.path().join("sparse")).unwrap();
+        file.set_len(100 * 1024 * 1024).unwrap();
+        assert!(compute_dir_size(dir.path()) < 1024 * 1024);
     }
 }
